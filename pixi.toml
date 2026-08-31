@@ -20,7 +20,11 @@ sqlite = ">=3.45,<4"
 [tasks]
 test-db = "mojo run -I . tests/test_db.mojo"
 test-fuzz = "mojo run -I . tests/test_fuzz.mojo"
-test = { depends-on = ["test-db", "test-fuzz"] }
+# Round-trip against the sqlite3 shell, in both directions: proof that the
+# files this binding writes are genuine SQLite databases, not merely
+# self-consistent ones.
+test-crosscheck = "sh tests/crosscheck.sh"
+test = { depends-on = ["test-db", "test-fuzz", "test-crosscheck"] }
 
 example-01 = "mojo run -I . examples/01_hello_sqlite.mojo"
 example-02 = "mojo run -I . examples/02_prepared_statements.mojo"

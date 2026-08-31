@@ -3,42 +3,30 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'README.md'
-      - 'LICENSE'
   pull_request:
-    branches: [main]
-    paths-ignore:
-      - 'README.md'
-      - 'LICENSE'
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   test:
-    name: Tests (${{ matrix.os }})
+    name: ${{ matrix.env == 'default' && 'nightly' || matrix.env }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14]
+        os: [ubuntu-latest, macos-latest]
+        env: [default, stable]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
+      - uses: prefix-dev/setup-pixi@v0.9.0
         with:
-          # Pin pixi: the default "latest" ships a build-api-version >=5
-          # that this repo's pixi-build-rattler-build 0.3.13 backend can't
-          # satisfy, failing the solve with "no candidates were found".
-          # 0.70.2 is the newest pixi compatible with that backend.
-          pixi-version: v0.70.2
-          cache: false
-          post-cleanup: false
+          environments: ${{ matrix.env }}
+          pixi-version: v0.71.1
 
-      - name: Run tests
-        run: pixi run tests
+      # `test` covers the db suite, the property suite, and the round-trip
+      # against the sqlite3 shell in both directions.
+      - name: Unit tests
+        run: pixi run -e ${{ matrix.env }} test
+
+      - name: Examples
+        run: pixi run -e ${{ matrix.env }} examples
