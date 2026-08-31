@@ -1,367 +1,414 @@
-"""Property-based fuzz tests for sqlite using mozz.
+"""Property-based fuzz tests for sqlite.
 
-Uses ``forall[T]`` for typed property tests and ``forall_bytes`` for raw-byte
-SQL injection probing.  All tests use in-memory SQLite databases so there are
-no side effects.
+Upstream drove these with `mozz <https://github.com/ehsanmok/mozz>`_; this fork
+keeps the properties but carries its own generators so the repo has no
+dependency outside conda-forge's ``libsqlite``.  The harness is deliberately
+small: a seeded xoshiro256** stream, a handful of biased generators, and a
+plain loop per property.  There is no shrinking — a failure reports the trial
+index and the offending input, and the seed makes the run reproducible.
+
+All tests use in-memory SQLite databases so there are no side effects.
 
 Properties verified:
 - **SQL safety**: executing any random UTF-8 string as SQL either succeeds or
   raises ``Error`` — never panics or corrupts memory.
+- **SQL byte safety**: the same, for random printable-ASCII byte sequences.
 - **bind_text round-trip**: for any random String ``s``, inserting it via
   ``bind_text`` and reading it back returns the original value.
 - **bind_int round-trip**: for any random ``Int`` ``v`` (full signed 64-bit
   range, boundary-biased), inserting via ``bind_int`` and reading back returns
   the original value.
-- **bind_float round-trip**: for any finite ``Float64`` generated within a safe
-  range, bind_float → read-back preserves value within Float64 precision.
-- **ORM text round-trip**: inserting a struct with a random String field via
-  the ORM and querying it back returns the original field value.
+- **bind_float round-trip**: for any finite ``Float64``, bind_float →
+  read-back preserves the value exactly.
 - **count invariant**: after ``N`` inserts (1 ≤ N ≤ 50), ``COUNT(*)`` equals N.
+- **injection safety**: no ``bind_text`` payload can escape its placeholder and
+  execute as SQL.
 """
 
+from std.memory import bitcast
 from std.testing import assert_equal, assert_true
 from sqlite.db import Database
-from sqlite.orm import create_table, insert, query
-from mozz import (
-    forall,
-    forall_bytes,
-    FuzzableString,
-    FuzzableInt,
-    Gen,
-)
-from mozz.rng import Xoshiro256
 
 
 # ---------------------------------------------------------------------------
-# Helper struct for ORM round-trip tests
+# xoshiro256** — a small, fast, seedable PRNG
 # ---------------------------------------------------------------------------
 
 
-@fieldwise_init
-struct TaggedValue(Defaultable, Movable, Copyable):
-    """Minimal struct used in ORM property tests."""
+def _splitmix64(mut x: UInt64) -> UInt64:
+    """One step of SplitMix64, used only to expand a seed into RNG state."""
+    x += 0x9E3779B97F4A7C15
+    var z = x
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EB
+    return z ^ (z >> 31)
 
-    var tag: String
-    var count: Int
 
-    def __init__(out self):
-        self.tag = ""
-        self.count = 0
+def _rotl(x: UInt64, k: UInt64) -> UInt64:
+    """Rotate ``x`` left by ``k`` bits."""
+    return (x << k) | (x >> (64 - k))
 
-    def __init__(out self, *, copy: Self):
-        self.tag = copy.tag
-        self.count = copy.count
+
+struct Xoshiro256(Movable):
+    """A xoshiro256** generator: 256 bits of state, period 2^256-1."""
+
+    var s0: UInt64
+    var s1: UInt64
+    var s2: UInt64
+    var s3: UInt64
+
+    def __init__(out self, seed: UInt64):
+        """Seed the generator; SplitMix64 spreads one word over all four."""
+        var x = seed
+        self.s0 = _splitmix64(x)
+        self.s1 = _splitmix64(x)
+        self.s2 = _splitmix64(x)
+        self.s3 = _splitmix64(x)
+
+    def next(mut self) -> UInt64:
+        """Return the next 64-bit output and advance the state."""
+        var result = _rotl(self.s1 * 5, 7) * 9
+        var t = self.s1 << 17
+        self.s2 ^= self.s0
+        self.s3 ^= self.s1
+        self.s1 ^= self.s2
+        self.s0 ^= self.s3
+        self.s2 ^= t
+        self.s3 = _rotl(self.s3, 45)
+        return result
+
+    def below(mut self, n: Int) -> Int:
+        """Return a value in ``[0, n)``.  Modulo bias is irrelevant here."""
+        return Int(self.next() % UInt64(n))
 
 
 # ---------------------------------------------------------------------------
-# Generator / minimizer helpers required by forall[T]
+# Generators
 # ---------------------------------------------------------------------------
 
 
-def gen_string(mut rng: Xoshiro256) -> String:
-    """Generate a random valid UTF-8 String."""
-    return FuzzableString.generate(rng)
+def _sql_tokens() -> List[String]:
+    """SQL metacharacters and injection payloads, over-represented on purpose."""
+    var out: List[String] = [
+        String("'"),
+        String('"'),
+        String("`"),
+        String(";"),
+        String("--"),
+        String("/*"),
+        String("*/"),
+        String("\\"),
+        String("%"),
+        String("_"),
+        String("?"),
+        String("\n"),
+        String("\t"),
+        String("' OR 1=1 --"),
+        String("'); DROP TABLE victims; --"),
+        String("' UNION SELECT 1 --"),
+        String("SELECT"),
+        String("x'00'"),
+    ]
+    return out^
 
 
-def minimize_string(s: String) -> List[String]:
-    """Return simpler String variants for counterexample minimization."""
-    return FuzzableString.minimize(s)
+def _gen_string(mut rng: Xoshiro256, imm tokens: List[String]) -> String:
+    """Generate a random UTF-8 String: ASCII, SQL tokens, and non-Latin text.
 
-
-def gen_int(mut rng: Xoshiro256) -> Int:
-    """Generate a boundary-biased random Int (full signed 64-bit range)."""
-    return FuzzableInt.generate(rng)
-
-
-def minimize_int(v: Int) -> List[Int]:
-    """Return simpler Int variants toward 0 for minimization."""
-    return FuzzableInt.minimize(v)
-
-
-# ---------------------------------------------------------------------------
-# Property 1: SQL safety (forall[String])
-# ---------------------------------------------------------------------------
-
-
-def prop_execute_any_sql_is_safe(sql: String) raises -> Bool:
-    """Property: db.execute(any_string) either succeeds or raises Error.
-
-    Crashes (panics, segfaults) would be detected by the mozz runner.
-    Raising an Error for invalid SQL is the expected, correct behavior.
+    NUL bytes are never generated — ``sqlite3_column_text`` hands back a C
+    string, so a value containing NUL could not round-trip through it and the
+    property would report a false failure.
     """
-    var db = Database(":memory:")
-    try:
-        db.execute(sql)
-    except:
-        pass  # Error is the correct outcome for invalid SQL
-    return True
+    var n = rng.below(24)
+    var s = String()
+    for _i in range(n):
+        var pick = rng.below(100)
+        if pick < 50:
+            # Printable ASCII, 0x20..0x7E.
+            s += chr(32 + rng.below(95))
+        elif pick < 75:
+            s += tokens[rng.below(len(tokens))]
+        elif pick < 90:
+            # Latin-1 supplement / Greek / Cyrillic — 2-byte UTF-8.
+            s += chr(0x00A1 + rng.below(0x0400))
+        else:
+            # CJK and emoji — 3- and 4-byte UTF-8.
+            if rng.below(2) == 0:
+                s += chr(0x4E00 + rng.below(0x1000))
+            else:
+                s += chr(0x1F300 + rng.below(0x200))
+    return s^
 
 
-def test_fuzz_sql_safety() raises:
-    """Any random UTF-8 string passed to execute is handled safely."""
-    forall[String](
-        prop_execute_any_sql_is_safe,
-        gen_string,
-        minimize_string,
-        trials=2_000,
-        seed=1,
+def _gen_int(mut rng: Xoshiro256) -> Int:
+    """Boundary-biased Int over the full signed 64-bit range."""
+    var pick = rng.below(10)
+    if pick == 0:
+        return 0
+    if pick == 1:
+        return 1
+    if pick == 2:
+        return -1
+    if pick == 3:
+        return 9223372036854775807  # Int64 max
+    if pick == 4:
+        return -9223372036854775807 - 1  # Int64 min
+    if pick == 5:
+        return rng.below(1000) - 500
+    return Int(bitcast[DType.int64](rng.next()))
+
+
+def _gen_float(mut rng: Xoshiro256) -> Float64:
+    """Boundary-biased finite Float64."""
+    var pick = rng.below(8)
+    if pick == 0:
+        return 0.0
+    if pick == 1:
+        return -0.0
+    if pick == 2:
+        return 1.0
+    if pick == 3:
+        return -1.0
+    if pick == 4:
+        return Float64(rng.below(1_000_000)) / 1000.0
+    if pick == 5:
+        return -Float64(rng.below(1_000_000)) / 1000.0
+    # An arbitrary bit pattern, rejected and retried if it is NaN or infinite.
+    var bits = rng.next()
+    var f = bitcast[DType.float64](bits)
+    if not (f == f) or f - f != 0.0:  # NaN or +/-Inf
+        return Float64(rng.below(1_000_000))
+    return Float64(f)
+
+
+def _gen_bytes(mut rng: Xoshiro256, max_len: Int) -> List[UInt8]:
+    """Generate up to ``max_len`` arbitrary bytes."""
+    var n = rng.below(max_len + 1)
+    var out = List[UInt8](capacity=n)
+    for _i in range(n):
+        out.append(UInt8(rng.below(256)))
+    return out^
+
+
+def _fail(imm name: String, trial: Int, imm detail: String) raises:
+    """Raise a reproducible counterexample report."""
+    raise Error(
+        name + ": property failed on trial " + String(trial) + " — " + detail
     )
 
 
 # ---------------------------------------------------------------------------
-# Property 2: SQL safety via raw bytes (forall_bytes)
+# Property 1: SQL safety, arbitrary UTF-8
 # ---------------------------------------------------------------------------
 
 
-def prop_execute_bytes_is_safe(data: List[UInt8]) raises -> Bool:
-    """Property: executing a byte sequence as SQL text is safe.
+def test_fuzz_sql_safety() raises:
+    """Any random UTF-8 string passed to execute is handled safely.
 
-    Constructs a String from valid UTF-8 bytes (non-UTF-8 bytes produce a
-    rejection by the FFI layer, which must also be handled gracefully).
+    ``db.execute(any_string)`` must either succeed or raise ``Error``.  A
+    crash or memory corruption would take the process down, which is exactly
+    what this loop is watching for.
     """
-    # Build string byte-by-byte, clamping to printable ASCII to stay valid
-    var s = String()
-    for i in range(len(data)):
-        var c = data[i]
-        if c >= 0x20 and c <= 0x7E:
-            s += chr(Int(c))
-    var db = Database(":memory:")
-    try:
-        db.execute(s)
-    except:
-        pass
-    return True
+    var rng = Xoshiro256(1)
+    var tokens = _sql_tokens()
+    for _i in range(2000):
+        var sql = _gen_string(rng, tokens)
+        var db = Database(":memory:")
+        try:
+            db.execute(sql)
+        except:
+            pass  # Error is the correct outcome for invalid SQL.
+
+
+# ---------------------------------------------------------------------------
+# Property 2: SQL safety, raw bytes
+# ---------------------------------------------------------------------------
 
 
 def test_fuzz_sql_bytes_safety() raises:
     """Executing random ASCII-printable byte sequences as SQL is always safe."""
-    forall_bytes(
-        prop_execute_bytes_is_safe,
-        max_len=128,
-        trials=3_000,
-        seed=2,
-    )
+    var rng = Xoshiro256(2)
+    for _i in range(3000):
+        var data = _gen_bytes(rng, 128)
+        var s = String()
+        for j in range(len(data)):
+            var c = data[j]
+            if c >= 0x20 and c <= 0x7E:
+                s += chr(Int(c))
+        var db = Database(":memory:")
+        try:
+            db.execute(s)
+        except:
+            pass
 
 
 # ---------------------------------------------------------------------------
-# Property 3: bind_text round-trip (forall[String])
+# Property 3: bind_text round-trip
 # ---------------------------------------------------------------------------
-
-
-def prop_bind_text_roundtrips(s: String) raises -> Bool:
-    """Property: any non-NUL String stored via bind_text is retrieved unchanged.
-
-    ``bind_text`` passes the explicit byte length so SQLite stores the full
-    string.  However, ``column_text`` returns a C-style null-terminated
-    pointer, so retrieval truncates at the first embedded NUL byte.  Strings
-    that contain NUL bytes are skipped (the property returns ``True``) because
-    such inputs cannot roundtrip correctly through ``column_text``.
-    """
-    # Skip strings with embedded null bytes.
-    # bind_text stores the full string, but column_text returns a C string
-    # (null-terminated), so column retrieval truncates at the first NUL byte.
-    # Strings containing NUL therefore cannot roundtrip correctly.
-    for i in range(s.byte_length()):
-        if s.unsafe_ptr()[i] == 0:
-            return True
-    var db = Database(":memory:")
-    db.execute("CREATE TABLE t (v TEXT)")
-
-    var ins = db.prepare("INSERT INTO t VALUES (?)")
-    ins.bind_text(1, s)
-    _ = ins.step()
-
-    var q = db.prepare("SELECT v FROM t")
-    var maybe = q.step()
-    if not maybe:
-        return False  # No row returned — counterexample.
-    ref row = maybe.value()
-    return row.text_val(0) == s
 
 
 def test_fuzz_bind_text_roundtrip() raises:
     """``bind_text`` → SELECT round-trips any random String value."""
-    forall[String](
-        prop_bind_text_roundtrips,
-        gen_string,
-        minimize_string,
-        trials=2_000,
-        seed=3,
-    )
+    var rng = Xoshiro256(3)
+    var tokens = _sql_tokens()
+    for i in range(2000):
+        var s = _gen_string(rng, tokens)
+        var db = Database(":memory:")
+        db.execute("CREATE TABLE t (v TEXT)")
+
+        var ins = db.prepare("INSERT INTO t VALUES (?)")
+        ins.bind_text(1, s)
+        _ = ins.step()
+
+        var q = db.prepare("SELECT v FROM t")
+        var maybe = q.step()
+        if not maybe:
+            _fail("bind_text roundtrip", i, "no row returned for " + repr(s))
+        if maybe.value().text_val(0) != s:
+            _fail(
+                "bind_text roundtrip",
+                i,
+                "read back "
+                + repr(maybe.value().text_val(0))
+                + ", expected "
+                + repr(s),
+            )
 
 
 # ---------------------------------------------------------------------------
-# Property 4: bind_int round-trip (forall[Int])
+# Property 4: bind_int round-trip
 # ---------------------------------------------------------------------------
-
-
-def prop_bind_int_roundtrips(v: Int) raises -> Bool:
-    """Property: any Int stored via bind_int is retrieved unchanged.
-
-    Covers the full signed 64-bit range including boundary values.
-    """
-    var db = Database(":memory:")
-    db.execute("CREATE TABLE t (v INTEGER)")
-
-    var ins = db.prepare("INSERT INTO t VALUES (?)")
-    ins.bind_int(1, v)
-    _ = ins.step()
-
-    var q = db.prepare("SELECT v FROM t")
-    var maybe = q.step()
-    if not maybe:
-        return False
-    ref row = maybe.value()
-    return row.int_val(0) == v
 
 
 def test_fuzz_bind_int_roundtrip() raises:
     """``bind_int`` → SELECT round-trips any random Int value."""
-    forall[Int](
-        prop_bind_int_roundtrips,
-        gen_int,
-        minimize_int,
-        trials=2_000,
-        seed=4,
-    )
+    var rng = Xoshiro256(4)
+    for i in range(2000):
+        var v = _gen_int(rng)
+        var db = Database(":memory:")
+        db.execute("CREATE TABLE t (v INTEGER)")
 
-
-# ---------------------------------------------------------------------------
-# Property 5: ORM text round-trip (forall[String])
-# ---------------------------------------------------------------------------
-
-
-def prop_orm_text_roundtrips(s: String) raises -> Bool:
-    """Property: ORM insert → query returns the original String field value."""
-    var db = Database(":memory:")
-    create_table[TaggedValue](db, "items")
-
-    insert[TaggedValue](db, "items", TaggedValue(tag=s, count=0))
-
-    var rows = query[TaggedValue](db, "items")
-    if len(rows) != 1:
-        return False
-    return rows[0].tag == s
-
-
-def test_fuzz_orm_text_roundtrip() raises:
-    """ORM insert → query round-trips any random String field value."""
-    forall[String](
-        prop_orm_text_roundtrips,
-        gen_string,
-        minimize_string,
-        trials=1_500,
-        seed=5,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Property 6: ORM int round-trip (forall[Int])
-# ---------------------------------------------------------------------------
-
-
-def prop_orm_int_roundtrips(v: Int) raises -> Bool:
-    """Property: ORM insert → query returns the original Int field value."""
-    var db = Database(":memory:")
-    create_table[TaggedValue](db, "items")
-
-    insert[TaggedValue](db, "items", TaggedValue(tag="x", count=v))
-
-    var rows = query[TaggedValue](db, "items")
-    if len(rows) != 1:
-        return False
-    return rows[0].count == v
-
-
-def test_fuzz_orm_int_roundtrip() raises:
-    """ORM insert → query round-trips any random Int field value."""
-    forall[Int](
-        prop_orm_int_roundtrips,
-        gen_int,
-        minimize_int,
-        trials=2_000,
-        seed=6,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Property 7: count invariant (forall_bytes used as random count source)
-# ---------------------------------------------------------------------------
-
-
-def prop_count_invariant(data: List[UInt8]) raises -> Bool:
-    """Property: COUNT(*) equals the number of inserts performed.
-
-    Derives a row count N in [1, 50] from the first byte of ``data``
-    so the property covers a range of insert counts.
-    """
-    if len(data) == 0:
-        return True
-
-    var n = Int(data[0] % 50) + 1  # N in [1, 50]
-    var db = Database(":memory:")
-    db.execute("CREATE TABLE t (id INTEGER)")
-    var ins = db.prepare("INSERT INTO t VALUES (?)")
-    for i in range(n):
-        ins.bind_int(1, i)
+        var ins = db.prepare("INSERT INTO t VALUES (?)")
+        ins.bind_int(1, v)
         _ = ins.step()
-        ins.reset()
 
-    var q = db.prepare("SELECT COUNT(*) FROM t")
-    var maybe = q.step()
-    if not maybe:
-        return False
-    ref row = maybe.value()
-    return row.int_val(0) == n
+        var q = db.prepare("SELECT v FROM t")
+        var maybe = q.step()
+        if not maybe:
+            _fail("bind_int roundtrip", i, "no row for " + String(v))
+        if maybe.value().int_val(0) != v:
+            _fail(
+                "bind_int roundtrip",
+                i,
+                "read back "
+                + String(maybe.value().int_val(0))
+                + ", expected "
+                + String(v),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Property 5: bind_float round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_fuzz_bind_float_roundtrip() raises:
+    """``bind_float`` → SELECT round-trips any finite Float64 exactly."""
+    var rng = Xoshiro256(5)
+    for i in range(2000):
+        var v = _gen_float(rng)
+        var db = Database(":memory:")
+        db.execute("CREATE TABLE t (v REAL)")
+
+        var ins = db.prepare("INSERT INTO t VALUES (?)")
+        ins.bind_float(1, v)
+        _ = ins.step()
+
+        var q = db.prepare("SELECT v FROM t")
+        var maybe = q.step()
+        if not maybe:
+            _fail("bind_float roundtrip", i, "no row for " + String(v))
+        if maybe.value().float_val(0) != v:
+            _fail(
+                "bind_float roundtrip",
+                i,
+                "read back "
+                + String(maybe.value().float_val(0))
+                + ", expected "
+                + String(v),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Property 6: count invariant
+# ---------------------------------------------------------------------------
 
 
 def test_fuzz_count_invariant() raises:
     """COUNT(*) always equals the number of INSERTs performed (1–50 rows)."""
-    forall_bytes(
-        prop_count_invariant,
-        max_len=1,
-        trials=500,
-        seed=7,
-    )
+    var rng = Xoshiro256(6)
+    for i in range(500):
+        var n = rng.below(50) + 1
+        var db = Database(":memory:")
+        db.execute("CREATE TABLE t (id INTEGER)")
+        var ins = db.prepare("INSERT INTO t VALUES (?)")
+        for j in range(n):
+            ins.bind_int(1, j)
+            _ = ins.step()
+            ins.reset()
+
+        var q = db.prepare("SELECT COUNT(*) FROM t")
+        var maybe = q.step()
+        if not maybe:
+            _fail("count invariant", i, "COUNT(*) returned no row")
+        if maybe.value().int_val(0) != n:
+            _fail(
+                "count invariant",
+                i,
+                "counted "
+                + String(maybe.value().int_val(0))
+                + " after "
+                + String(n)
+                + " inserts",
+            )
 
 
 # ---------------------------------------------------------------------------
-# Property 8: prepared statement SQL injection safety (forall[String])
+# Property 7: prepared-statement injection safety
 # ---------------------------------------------------------------------------
-
-
-def prop_bind_text_sql_injection_safe(s: String) raises -> Bool:
-    """Property: SQL injection via bind_text cannot drop the table.
-
-    Inserts ``s`` as the only row and verifies the table still exists
-    and has exactly 1 row afterward — confirming the injected text was
-    treated as data, not executed as SQL.
-    """
-    var db = Database(":memory:")
-    db.execute("CREATE TABLE victims (val TEXT)")
-
-    var ins = db.prepare("INSERT INTO victims VALUES (?)")
-    ins.bind_text(1, s)
-    _ = ins.step()
-
-    # If SQL injection worked, the table would be gone and COUNT(*) would raise.
-    var q = db.prepare("SELECT COUNT(*) FROM victims")
-    var maybe = q.step()
-    if not maybe:
-        return False
-    ref row = maybe.value()
-    return row.int_val(0) == 1
 
 
 def test_fuzz_sql_injection_safety() raises:
-    """``bind_text`` prevents SQL injection for any random String payload."""
-    forall[String](
-        prop_bind_text_sql_injection_safe,
-        gen_string,
-        minimize_string,
-        trials=2_000,
-        seed=8,
-    )
+    """``bind_text`` prevents SQL injection for any random String payload.
+
+    The payload goes in as the table's only row; afterwards the table must
+    still exist and hold exactly one row, which it would not if the text had
+    escaped its placeholder and run as SQL.
+    """
+    var rng = Xoshiro256(7)
+    var tokens = _sql_tokens()
+    for i in range(2000):
+        var s = _gen_string(rng, tokens)
+        var db = Database(":memory:")
+        db.execute("CREATE TABLE victims (val TEXT)")
+
+        var ins = db.prepare("INSERT INTO victims VALUES (?)")
+        ins.bind_text(1, s)
+        _ = ins.step()
+
+        var q = db.prepare("SELECT COUNT(*) FROM victims")
+        var maybe = q.step()
+        if not maybe:
+            _fail("injection safety", i, "victims table is gone")
+        if maybe.value().int_val(0) != 1:
+            _fail(
+                "injection safety",
+                i,
+                "victims holds "
+                + String(maybe.value().int_val(0))
+                + " rows after payload "
+                + repr(s),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -382,11 +429,8 @@ def main() raises:
     test_fuzz_bind_int_roundtrip()
     print("test_fuzz_bind_int_roundtrip         PASSED (2000 trials)")
 
-    test_fuzz_orm_text_roundtrip()
-    print("test_fuzz_orm_text_roundtrip         PASSED (1500 trials)")
-
-    test_fuzz_orm_int_roundtrip()
-    print("test_fuzz_orm_int_roundtrip          PASSED (2000 trials)")
+    test_fuzz_bind_float_roundtrip()
+    print("test_fuzz_bind_float_roundtrip       PASSED (2000 trials)")
 
     test_fuzz_count_invariant()
     print("test_fuzz_count_invariant            PASSED  (500 trials)")

@@ -1,60 +1,75 @@
 [workspace]
-authors = ["ehsanmok <ehsanmok@users.noreply.github.com>"]
-channels = ["https://conda.modular.com/max", "conda-forge"]
-name = "sqlite"
-platforms = ["linux-64", "osx-arm64"]
-version = "0.2.0"
+authors = [
+    "Ehsan M. Kermani <ehsanmok@users.noreply.github.com>",
+    "Marius S <39998+winding-lines@users.noreply.github.com>",
+]
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+name = "sqlite.mojo"
+version = "0.3.0"
+description = "A Mojo binding to SQLite (libsqlite3) via FFI: connections, prepared statements, and RAII transactions."
 preview = ["pixi-build"]
-
-[package]
-name = "sqlite"
-version = "0.2.0"
-
-[package.build]
-backend = { name = "pixi-build-rattler-build", version = "==0.3.13" }
+platforms = ["osx-arm64", "linux-64"]
 
 [dependencies]
-mojo = ">=1.0.0,<1.1.0"
-morph = { git = "https://github.com/ehsanmok/morph.git", tag = "v0.2.0" }
-sqlite = ">=3.45"
-
-[feature.dev.dependencies]
-pre-commit = ">=4.2.0,<5"
-mojodoc = { git = "https://github.com/ehsanmok/mojodoc.git", tag = "v0.1.0" }
-mozz = { git = "https://github.com/ehsanmok/mozz.git", tag = "v0.2.0" }
-
-[activation]
-env = { MOJO_FLAGS = "-I ." }
-
-[environments]
-default = { features = ["dev"], solve-group = "default" }
-dev     = { features = ["dev"], solve-group = "default" }
+# conda-forge splits SQLite in two: `libsqlite` carries libsqlite3.{so,dylib}
+# plus sqlite3.h and is what the FFI dlopens; `sqlite` is the command-line
+# shell built on top of it, used here only by the cross-check test.
+libsqlite = ">=3.45,<4"
+sqlite = ">=3.45,<4"
 
 [tasks]
-# Format
-install-pre-commit = "pre-commit install"
-format = { cmd = "mojo format sqlite tests examples benchmark", depends-on = ["install-pre-commit"] }
-format-check = "mojo format --check sqlite tests examples benchmark"
+test-db = "mojo run -I . tests/test_db.mojo"
+test-fuzz = "mojo run -I . tests/test_fuzz.mojo"
+test = { depends-on = ["test-db", "test-fuzz"] }
 
-# Tests
-tests     = "mojo $MOJO_FLAGS tests/test_db.mojo && mojo $MOJO_FLAGS tests/test_orm.mojo"
-test-db   = "mojo $MOJO_FLAGS tests/test_db.mojo"
-test-orm  = "mojo $MOJO_FLAGS tests/test_orm.mojo"
-test-fuzz = "mojo $MOJO_FLAGS tests/test_fuzz.mojo"
+example-01 = "mojo run -I . examples/01_hello_sqlite.mojo"
+example-02 = "mojo run -I . examples/02_prepared_statements.mojo"
+example-03 = "mojo run -I . examples/03_all_types.mojo"
+example-04 = "mojo run -I . examples/04_contacts_app.mojo"
+example-05 = "mojo run -I . examples/05_transactions.mojo"
+examples = { depends-on = [
+    "example-01",
+    "example-02",
+    "example-03",
+    "example-04",
+    "example-05",
+] }
 
-# Examples (run individually or all at once)
-example-01 = "mojo $MOJO_FLAGS examples/01_hello_sqlite.mojo"
-example-02 = "mojo $MOJO_FLAGS examples/02_prepared_statements.mojo"
-example-03 = "mojo $MOJO_FLAGS examples/03_all_types.mojo"
-example-04 = "mojo $MOJO_FLAGS examples/04_orm_basics.mojo"
-example-05 = "mojo $MOJO_FLAGS examples/05_orm_optional.mojo"
-example-06 = "mojo $MOJO_FLAGS examples/06_contacts_app.mojo"
-example-07 = "mojo $MOJO_FLAGS examples/07_transactions.mojo"
-examples   = { depends-on = ["example-01", "example-02", "example-03", "example-04", "example-05", "example-06", "example-07"] }
+format = "mojo format sqlite tests examples"
+format-check = "mojo format --check sqlite tests examples"
 
-# Benchmark
-bench = "mojo $MOJO_FLAGS benchmark/bench.mojo"
+# ── pixi-build: consumable as a pixi source dependency ──────────────────────
+# Conda package name is sqlite-mojo (conda-forge owns "sqlite"); the Mojo
+# import stays `from sqlite import …`.
+[package]
+name = "sqlite-mojo"
+version = "0.3.0"
 
-# Docs
-docs       = "mojodoc ./sqlite --open"
-docs-build = "mojodoc ./sqlite --out-dir target/doc --base-url /sqlite/"
+[package.build]
+backend = { name = "pixi-build-mojo", version = "0.*" }
+
+[package.build.config.pkg]
+path = "sqlite"
+name = "sqlite"
+
+[package.host-dependencies]
+mojo-compiler = "==1.0.0"
+libsqlite = ">=3.45,<4"
+
+[package.build-dependencies]
+mojo-compiler = "==1.0.0"
+
+[package.run-dependencies]
+mojo-compiler = ">=1.0.0,<2"
+libsqlite = ">=3.45,<4"
+
+# ── stable / nightly toolchain matrix (see CI) ──────────────────────────────
+[feature.nightly.dependencies]
+modular = ">=26.6.0.dev2026082605,<27"
+
+[feature.stable.dependencies]
+mojo-compiler = "==1.0.0"
+
+[environments]
+default = ["nightly"]
+stable = ["stable"]

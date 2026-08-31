@@ -28,24 +28,23 @@ Coverage:
 
 from std.testing import assert_equal, assert_true, assert_false
 from sqlite.db import Database, Row, Transaction
-from sqlite.orm import create_table, insert, query as orm_query
 
 
-# Top-level struct for test_transaction_orm_atomicity (Mojo disallows
-# struct definitions inside def bodies).
-@fieldwise_init
-struct TxItem(Defaultable, Movable, Copyable):
-    """Test helper: a simple 2-field ORM struct used in transaction tests."""
-    var label: String
-    var qty: Int
+def _count(mut db: Database, imm table: String) raises -> Int:
+    """Test helper: ``SELECT COUNT(*)`` from ``table``."""
+    var q = db.prepare("SELECT COUNT(*) FROM " + table)
+    var maybe_row = q.step()
+    if not maybe_row:
+        return 0
+    return maybe_row.value().int_val(0)
 
-    def __init__(out self):
-        self.label = ""
-        self.qty = 0
 
-    def __init__(out self, *, copy: Self):
-        self.label = copy.label
-        self.qty = copy.qty
+def _insert_item(mut db: Database, imm label: String, qty: Int) raises:
+    """Test helper: one parameterised INSERT into ``items``."""
+    var stmt = db.prepare("INSERT INTO items (label, qty) VALUES (?, ?)")
+    stmt.bind_text(1, label)
+    stmt.bind_int(2, qty)
+    _ = stmt.step()
 
 
 # -----------------------------------------------------------------------
@@ -875,31 +874,30 @@ def test_with_transaction_rollback_does_not_affect_prior_commit() raises:
     assert_equal(row.int_val(0), 1, "prior committed row must survive a later rollback")
 
 
-def test_transaction_orm_atomicity() raises:
-    """Two ORM inserts in a transaction are both committed or both rolled back."""
+def test_transaction_prepared_insert_atomicity() raises:
+    """Two prepared inserts in a transaction are both committed or both rolled back."""
     var db = Database(":memory:")
-    create_table[TxItem](db, "items")
+    db.execute("CREATE TABLE items (label TEXT, qty INTEGER)")
 
-    # Success path: both ORM inserts committed.
+    # Success path: both inserts committed.
     var tx1 = db.transaction()
-    insert[TxItem](db, "items", TxItem(label="apple", qty=10))
-    insert[TxItem](db, "items", TxItem(label="banana", qty=20))
+    _insert_item(db, "apple", 10)
+    _insert_item(db, "banana", 20)
     tx1.commit()
 
-    assert_equal(len(orm_query[TxItem](db, "items")), 2, "Both items should be committed")
+    assert_equal(_count(db, "items"), 2, "Both items should be committed")
 
-    # Rollback path: ORM insert + bad statement → explicit rollback.
+    # Rollback path: insert + bad statement → explicit rollback.
     var tx2 = db.transaction()
     try:
-        insert[TxItem](db, "items", TxItem(label="cherry", qty=5))
+        _insert_item(db, "cherry", 5)
         var _ = db.prepare("SELECT * FROM nonexistent")  # raises
         tx2.commit()  # unreachable
     except:
         tx2.rollback()  # explicit rollback in handler
 
     assert_equal(
-        len(orm_query[TxItem](db, "items")), 2,
-        "cherry must not appear after rollback"
+        _count(db, "items"), 2, "cherry must not appear after rollback"
     )
 
 
@@ -1036,8 +1034,8 @@ def main() raises:
     print("test_transaction_atomicity_multiple_inserts         PASSED")
     test_transaction_error_leaves_table_empty()
     print("test_transaction_error_leaves_table_empty           PASSED")
-    test_transaction_orm_atomicity()
-    print("test_transaction_orm_atomicity                      PASSED")
+    test_transaction_prepared_insert_atomicity()
+    print("test_transaction_prepared_insert_atomicity          PASSED")
 
     # Transaction context manager
     test_with_transaction_auto_commit()

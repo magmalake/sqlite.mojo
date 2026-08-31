@@ -4,10 +4,11 @@
 # pixi environments
 .pixi/*
 !.pixi/config.toml
-*.lock
 
 # Build outputs
 target/
+build/
+*.conda
 
 # Mojo cache
 __pycache__/

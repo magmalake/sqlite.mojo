@@ -1,44 +1,43 @@
-"""SQLite bindings with morph ORM integration for Mojo.
+"""SQLite bindings for Mojo — a dependency-free fork of ehsanmok/sqlite.
 
-``sqlite`` provides three layers of abstraction over the SQLite C library:
+``sqlite`` provides two layers of abstraction over the SQLite C library:
 
 **Layer 1, FFI** (``sqlite.ffi``): raw ``sqlite3_*`` wrappers with
-handles stored as ``Int``.  Not intended for direct use.
+handles stored as ``Int``.  Not intended for direct use.  ``libsqlite3`` is
+``dlopen``ed once per process and its entry points resolved once, so opening a
+connection or compiling a statement costs no dynamic linking.
 
 **Layer 2, Safe API** (``sqlite.db``): ``Database``, ``Statement``,
 ``Row``, and ``Transaction`` structs that own their handles and clean up on
 destruction.
 
-**Layer 3, ORM** (``sqlite.orm``): ``create_table``, ``insert``, and
-``query`` generic functions that use compile-time reflection (via
-`morph <https://github.com/ehsanmok/morph>`_) to map Mojo structs directly to
-SQLite tables.
+Upstream carries a third layer, an ORM built on compile-time reflection via
+`morph <https://github.com/ehsanmok/morph>`_.  This fork deliberately drops it
+so the package depends on nothing outside conda-forge's ``libsqlite`` — use
+`ehsanmok/sqlite <https://github.com/ehsanmok/sqlite>`_ if you want the ORM.
 
 ## Quick Start
 
 ```mojo
-from sqlite import Database, create_table, insert, query
-
-@fieldwise_init
-struct Person(Defaultable, Movable):
-    var name: String
-    var age: Int
-    var score: Float64
-
-    def __init__(out self):
-        self.name = ""
-        self.age = 0
-        self.score = 0.0
+from sqlite import Database
 
 def main() raises:
     var db = Database(":memory:")
-    create_table[Person](db, "people")
-    insert[Person](db, "people", Person(name="Alice", age=30, score=9.5))
-    insert[Person](db, "people", Person(name="Bob",   age=25, score=7.2))
+    db.execute("CREATE TABLE people (name TEXT, age INTEGER, score REAL)")
 
-    var rows = query[Person](db, "people")
-    for i in range(len(rows)):
-        print(rows[i].name, rows[i].age, rows[i].score)
+    var ins = db.prepare("INSERT INTO people VALUES (?, ?, ?)")
+    ins.bind_text(1, "Alice")
+    ins.bind_int(2, 30)
+    ins.bind_float(3, 9.5)
+    _ = ins.step()
+
+    var q = db.prepare("SELECT name, age, score FROM people")
+    while True:
+        var row = q.step()
+        if not row:
+            break
+        ref r = row.value()
+        print(r.text_val(0), r.int_val(1), r.float_val(2))
 ```
 
 ## Transaction API: context manager (recommended)
@@ -99,4 +98,3 @@ while True:
 """
 
 from .db import Database, Statement, Row, Transaction
-from .orm import create_table, insert, query
