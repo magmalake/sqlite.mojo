@@ -40,7 +40,7 @@ Provides four structs that wrap the raw FFI handles from ``ffi.mojo``:
 """
 
 from .ffi import (
-    Sqlite3FFI,
+    sqlite_ffi,
     SQLITE_ROW,
     SQLITE_INTEGER,
     SQLITE_FLOAT,
@@ -98,7 +98,6 @@ struct Transaction(Movable):
         Use ``SAVEPOINT`` directly if you need nesting.
     """
 
-    var _ffi:    Sqlite3FFI
     var _handle: Int   # sqlite3 connection handle (non-owning borrow)
     var _done:   Bool  # True after commit() or rollback(); silences __del__
 
@@ -111,12 +110,11 @@ struct Transaction(Movable):
         Raises:
             Error: If ``BEGIN`` fails (e.g. a transaction is already active).
         """
-        self._ffi    = Sqlite3FFI()
         self._handle = handle
         self._done   = False
-        self._ffi.exec(handle, "BEGIN")
+        sqlite_ffi().exec(handle, "BEGIN")
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         """Issue ``ROLLBACK`` if the transaction was neither committed nor rolled back.
 
         Errors from the implicit ``ROLLBACK`` are swallowed so destructors
@@ -124,7 +122,7 @@ struct Transaction(Movable):
         """
         if not self._done:
             try:
-                self._ffi.exec(self._handle, "ROLLBACK")
+                sqlite_ffi().exec(self._handle, "ROLLBACK")
             except:
                 pass
 
@@ -137,7 +135,7 @@ struct Transaction(Movable):
             Error: If ``COMMIT`` fails.
         """
         if not self._done:
-            self._ffi.exec(self._handle, "COMMIT")
+            sqlite_ffi().exec(self._handle, "COMMIT")
             self._done = True
 
     def rollback(mut self) raises:
@@ -151,7 +149,7 @@ struct Transaction(Movable):
             Error: If ``ROLLBACK`` fails.
         """
         if not self._done:
-            self._ffi.exec(self._handle, "ROLLBACK")
+            sqlite_ffi().exec(self._handle, "ROLLBACK")
             self._done = True
 
     # ------------------------------------------------------------------
@@ -312,7 +310,6 @@ struct Statement(Movable):
     Parameters use 1-based indexing (as in the SQLite C API).
     """
 
-    var _ffi:    Sqlite3FFI
     var _db:     Int
     var _handle: Int
 
@@ -326,13 +323,15 @@ struct Statement(Movable):
         Raises:
             Error: If the SQL fails to compile.
         """
-        self._ffi    = Sqlite3FFI()
         self._db     = db
-        self._handle = self._ffi.prepare_v2(db, sql)
+        self._handle = sqlite_ffi().prepare_v2(db, sql)
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         """Finalize the statement and release its resources."""
-        self._ffi.finalize(self._handle)
+        try:
+            sqlite_ffi().finalize(self._handle)
+        except:
+            pass
 
     def reset(self) raises:
         """Reset the statement so it can be re-executed.
@@ -340,7 +339,7 @@ struct Statement(Movable):
         Raises:
             Error: If the reset call fails.
         """
-        var rc = self._ffi.reset(self._handle)
+        var rc = sqlite_ffi().reset(self._handle)
         if rc != 0:
             raise Error("sqlite3_reset failed (rc=" + String(Int(rc)) + ")")
 
@@ -356,7 +355,7 @@ struct Statement(Movable):
         Raises:
             Error: On binding failure.
         """
-        self._ffi.bind_int(self._handle, idx, val)
+        sqlite_ffi().bind_int(self._handle, idx, val)
 
     def bind_float(self, idx: Int, val: Float64) raises:
         """Bind a floating-point value to parameter ``idx``.
@@ -368,7 +367,7 @@ struct Statement(Movable):
         Raises:
             Error: On binding failure.
         """
-        self._ffi.bind_double(self._handle, idx, val)
+        sqlite_ffi().bind_double(self._handle, idx, val)
 
     def bind_text(self, idx: Int, val: String) raises:
         """Bind a text value to parameter ``idx``.
@@ -380,15 +379,18 @@ struct Statement(Movable):
         Raises:
             Error: On binding failure.
         """
-        self._ffi.bind_text(self._handle, idx, val)
+        sqlite_ffi().bind_text(self._handle, idx, val)
 
-    def bind_null(self, idx: Int):
+    def bind_null(self, idx: Int) raises:
         """Bind SQL NULL to parameter ``idx``.
 
         Args:
             idx: 1-based parameter index.
+
+        Raises:
+            Error: On binding failure.
         """
-        self._ffi.bind_null(self._handle, idx)
+        sqlite_ffi().bind_null(self._handle, idx)
 
     # -- execution -----------------------------------------------------------
 
@@ -405,28 +407,29 @@ struct Statement(Movable):
         Raises:
             Error: If ``sqlite3_step`` returns an error code.
         """
-        var rc = self._ffi.step(self._handle)
+        ref ffi = sqlite_ffi()
+        var rc = ffi.step(self._handle)
         if rc == SQLITE_ROW:
-            var ncols  = self._ffi.column_count(self._handle)
+            var ncols  = ffi.column_count(self._handle)
             var types  = List[Int]()
             var ints   = List[Int]()
             var floats = List[Float64]()
             var texts  = List[String]()
             for col in range(ncols):
-                var t = self._ffi.column_type(self._handle, col)
+                var t = ffi.column_type(self._handle, col)
                 types.append(t)
                 if t == SQLITE_INTEGER:
-                    ints.append(self._ffi.column_int(self._handle, col))
+                    ints.append(ffi.column_int(self._handle, col))
                     floats.append(Float64(0))
                     texts.append(String(""))
                 elif t == SQLITE_FLOAT:
                     ints.append(0)
-                    floats.append(self._ffi.column_double(self._handle, col))
+                    floats.append(ffi.column_double(self._handle, col))
                     texts.append(String(""))
                 elif t == SQLITE_TEXT:
                     ints.append(0)
                     floats.append(Float64(0))
-                    texts.append(self._ffi.column_text(self._handle, col))
+                    texts.append(ffi.column_text(self._handle, col))
                 else:  # NULL or BLOB
                     ints.append(0)
                     floats.append(Float64(0))
@@ -436,7 +439,7 @@ struct Statement(Movable):
             return None
         raise Error(
             "sqlite3_step failed (rc=" + String(Int(rc)) + "): "
-            + self._ffi.errmsg(self._db)
+            + ffi.errmsg(self._db)
         )
 
 
@@ -458,7 +461,6 @@ struct Database(Movable):
         db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
     """
 
-    var _ffi:    Sqlite3FFI
     var _handle: Int
 
     def __init__(out self, path: String) raises:
@@ -470,12 +472,14 @@ struct Database(Movable):
         Raises:
             Error: If ``sqlite3_open`` fails.
         """
-        self._ffi    = Sqlite3FFI()
-        self._handle = self._ffi.open(path)
+        self._handle = sqlite_ffi().open(path)
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         """Close the database connection."""
-        _ = self._ffi.close(self._handle)
+        try:
+            _ = sqlite_ffi().close(self._handle)
+        except:
+            pass
 
     def execute(self, sql: String) raises:
         """Execute one or more SQL statements with no result rows.
@@ -489,7 +493,7 @@ struct Database(Movable):
         Raises:
             Error: If ``sqlite3_exec`` fails.
         """
-        self._ffi.exec(self._handle, sql)
+        sqlite_ffi().exec(self._handle, sql)
 
     def prepare(self, sql: String) raises -> Statement:
         """Compile a SQL statement for repeated execution.
@@ -528,10 +532,14 @@ struct Database(Movable):
         """
         return Transaction(self._handle)
 
-    def last_error(self) -> String:
+    def last_error(self) raises -> String:
         """Return the most recent error message for this connection.
 
         Returns:
             Human-readable error string from ``sqlite3_errmsg``.
+
+        Raises:
+            Error: Only if ``libsqlite3`` could not be loaded, which cannot
+            happen once a ``Database`` exists.
         """
-        return self._ffi.errmsg(self._handle)
+        return sqlite_ffi().errmsg(self._handle)

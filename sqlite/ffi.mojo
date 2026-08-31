@@ -8,13 +8,18 @@ into owned ``String`` values via ``StringSlice``.
 
 The library is loaded at runtime via ``OwnedDLHandle`` so Mojo's JIT
 never needs to resolve SQLite symbols at compile time, eliminating the
-``JIT session error: Symbols not found`` failure on Linux.
+``JIT session error: Symbols not found`` failure on Linux.  The handle is
+opened, and every entry point resolved, **once per process** (``_FFI``
+below): a ``dlopen``/``dlclose`` cycle of an already-resident library costs
+around 450 microseconds on macOS, so opening one per ``Database`` — let alone
+per ``Statement`` or ``Transaction``, as this binding used to — made the fixed
+cost of preparing a query dwarf the query itself.
 
 Do not call ``Sqlite3FFI`` methods from user code -- use ``db.mojo``.
 """
 
-from std.ffi import OwnedDLHandle, RTLD, CStringSlice
-from std.os import getenv
+from std.ffi import _Global, OwnedDLHandle, RTLD, CStringSlice
+from std.os import abort, getenv
 from std.sys.info import CompilationTarget
 from std.memory import UnsafePointer, Pointer
 
@@ -124,21 +129,24 @@ struct Sqlite3FFI(Movable):
     """Runtime-loaded SQLite FFI: ``dlopen`` + ``dlsym`` for all C entry-points.
 
     Loads ``libsqlite3`` at construction via ``OwnedDLHandle`` and resolves
-    every function pointer via ``get_function``.  All opaque pointer arguments
-    (``sqlite3*``, ``sqlite3_stmt*``) are represented as ``Int`` (64-bit on
-    all supported platforms), matching the C ABI on x86-64 and arm64 without
-    requiring ``UnsafePointer`` type annotations.
+    every function pointer once.  All opaque pointer arguments (``sqlite3*``,
+    ``sqlite3_stmt*``) are represented as ``Int`` (64-bit on all supported
+    platforms), matching the C ABI on x86-64 and arm64 without requiring
+    ``UnsafePointer`` type annotations.
 
-    Each ``Database``, ``Statement``, and ``Transaction`` owns one instance.
-    The OS reference-counts the underlying shared library, so multiple
-    concurrent ``OwnedDLHandle`` objects map to a single loaded image.
-    ``RTLD.NODELETE`` ensures ``dlclose`` is a no-op: the library stays
-    resident for the process lifetime even as ``Sqlite3FFI`` instances
-    are created and destroyed per-request.
+    **Construct this exactly once per process** -- reach it through
+    ``sqlite_ffi()``, which returns a borrow of the ``_Global`` instance.
+    ``RTLD.NODELETE`` additionally makes ``dlclose`` a no-op, so the library
+    image stays resident (and its VFS state, WAL locks and shared-memory
+    mappings intact) for the process lifetime.
+
+    Because ``_dl_sym`` copies each symbol's address out into a plain
+    function value, calls do not borrow the handle; the handle only has to
+    outlive them, which the ``_Global`` guarantees.
 
     Example::
 
-        var ffi = Sqlite3FFI()
+        ref ffi = sqlite_ffi()
         var db = ffi.open(":memory:")
         ffi.exec(db, "CREATE TABLE t (x INTEGER)")
         _ = ffi.close(db)
@@ -269,7 +277,7 @@ struct Sqlite3FFI(Movable):
         var src = filename.unsafe_ptr()
         var buf = List[UInt8](capacity=n + 1)
         for i in range(n):
-            buf.append(src[i])
+            buf.append(src[unsafe_offset=i])
         buf.append(0)  # explicit null terminator
         var db_out = List[Int](capacity=1)
         db_out.append(0)
@@ -327,7 +335,7 @@ struct Sqlite3FFI(Movable):
         var src = sql.unsafe_ptr()
         var buf = List[UInt8](capacity=n + 1)
         for i in range(n):
-            buf.append(src[i])
+            buf.append(src[unsafe_offset=i])
         buf.append(0)  # explicit null terminator
         var rc = self._fn_exec(
             db, Int(buf.unsafe_ptr()), Int(0), Int(0), Int(0)
@@ -473,14 +481,18 @@ struct Sqlite3FFI(Movable):
         _ = v^  # keep v alive past the FFI call
         _check(rc, "sqlite3_bind_text (idx=" + String(idx) + ") failed")
 
-    def bind_null(self, stmt: Int, idx: Int):
+    def bind_null(self, stmt: Int, idx: Int) raises:
         """Bind SQL NULL to a statement parameter.
 
         Args:
             stmt: sqlite3_stmt handle.
             idx:  Parameter index (1-based).
+
+        Raises:
+            Error: On binding failure.
         """
-        _ = self._fn_bind_null(stmt, Int32(idx))
+        var rc = self._fn_bind_null(stmt, Int32(idx))
+        _check(rc, "sqlite3_bind_null (idx=" + String(idx) + ") failed")
 
     # -- column reading ------------------------------------------------------
 
@@ -544,3 +556,34 @@ struct Sqlite3FFI(Movable):
             string for SQL NULL.
         """
         return _ptr_to_string(self._fn_col_text(stmt, Int32(col)))
+
+
+# -----------------------------------------------------------------------
+# Process-wide instance
+# -----------------------------------------------------------------------
+
+
+def _open_ffi() -> Sqlite3FFI:
+    """``dlopen`` libsqlite3 and resolve every symbol, once, per process."""
+    try:
+        return Sqlite3FFI()
+    except e:
+        abort(String("sqlite.mojo: ", e))
+
+
+comptime _FFI = _Global["sqlite_mojo_libsqlite3", _open_ffi]
+"""The loaded library and its resolved entry points, initialised on first use.
+
+``_Global`` initialises exactly once even under concurrent first use, and the
+value is never destroyed, so the ``OwnedDLHandle`` it owns is never
+``dlclose``d.  Every ``Database``, ``Statement`` and ``Transaction`` borrows
+this one instance instead of opening its own -- opening one per object made a
+``db.prepare(...)`` cost a full ``dlopen``/``dlclose`` cycle (~450 microseconds
+on macOS) plus eighteen ``dlsym`` lookups, orders of magnitude more than
+compiling the SQL it was there to compile.
+"""
+
+
+def sqlite_ffi() raises -> ref[MutUntrackedOrigin] Sqlite3FFI:
+    """The process-wide FFI table, borrowed.  Never destroy the referent."""
+    return _FFI.get_or_create_ptr()[]
