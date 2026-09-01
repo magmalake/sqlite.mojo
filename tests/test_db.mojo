@@ -920,6 +920,33 @@ def test_last_error_after_open() raises:
 # -----------------------------------------------------------------------
 
 
+def test_changes_and_last_insert_rowid() raises:
+    """changes() counts the rows a statement touched; a guarded update that
+    matches nothing reports 0, which is what optimistic concurrency relies on."""
+    var db = Database(":memory:")
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+
+    db.execute("INSERT INTO t (v) VALUES ('a')")
+    assert_equal(db.changes(), 1)
+    var first = db.last_insert_rowid()
+    assert_true(first > 0)
+
+    db.execute("INSERT INTO t (v) VALUES ('b'), ('c')")
+    assert_equal(db.changes(), 2)
+    assert_equal(db.last_insert_rowid(), first + 2)
+
+    db.execute("UPDATE t SET v = 'z' WHERE v IN ('a', 'b')")
+    assert_equal(db.changes(), 2)
+
+    # The case the Iceberg catalog's guarded pointer swap depends on.
+    db.execute("UPDATE t SET v = 'q' WHERE v = 'no-such-value'")
+    assert_equal(db.changes(), 0)
+
+    db.execute("DELETE FROM t WHERE v = 'z'")
+    assert_equal(db.changes(), 2)
+
+    assert_true(db.total_changes() >= 7)
+
 def main() raises:
     # Lifecycle
     test_open_memory()
@@ -1052,5 +1079,9 @@ def main() raises:
     # last_error
     test_last_error_after_open()
     print("test_last_error_after_open           PASSED")
+
+    # changes / last_insert_rowid
+    test_changes_and_last_insert_rowid()
+    print("test_changes_and_last_insert_rowid   PASSED")
 
     print("\nAll db tests passed.")

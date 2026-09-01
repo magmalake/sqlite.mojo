@@ -532,6 +532,46 @@ struct Database(Movable):
         """
         return Transaction(self._handle)
 
+    def changes(self) raises -> Int:
+        """Return rows inserted, updated or deleted by the most recent statement.
+
+        The value a guarded write checks: an ``UPDATE ... WHERE`` whose
+        predicate matched nothing reports 0, which is how optimistic
+        concurrency detects that it lost the race rather than silently
+        succeeding.
+
+        Returns:
+            Row count from ``sqlite3_changes``.
+
+        Raises:
+            Error: Only if ``libsqlite3`` could not be loaded, which cannot
+            happen once a ``Database`` exists.
+        """
+        return sqlite_ffi().changes(self._handle)
+
+    def total_changes(self) raises -> Int:
+        """Return rows changed by every statement since this connection opened.
+
+        Returns:
+            Cumulative row count from ``sqlite3_total_changes``.
+
+        Raises:
+            Error: Only if ``libsqlite3`` could not be loaded.
+        """
+        return sqlite_ffi().total_changes(self._handle)
+
+    def last_insert_rowid(self) raises -> Int:
+        """Return the rowid of the most recent successful INSERT.
+
+        Returns:
+            Rowid from ``sqlite3_last_insert_rowid``, or 0 if this connection
+            has inserted no rows.
+
+        Raises:
+            Error: Only if ``libsqlite3`` could not be loaded.
+        """
+        return sqlite_ffi().last_insert_rowid(self._handle)
+
     def last_error(self) raises -> String:
         """Return the most recent error message for this connection.
 

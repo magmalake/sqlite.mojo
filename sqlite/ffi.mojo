@@ -157,6 +157,9 @@ struct Sqlite3FFI(Movable):
     # -- connection functions ------------------------------------------------
     var _fn_open:   def(Int, Int) thin abi("C") -> Int32
     var _fn_close:  def(Int) thin abi("C") -> Int32
+    var _fn_changes: def(Int) thin abi("C") -> Int32
+    var _fn_total_changes: def(Int) thin abi("C") -> Int32
+    var _fn_last_rowid: def(Int) thin abi("C") -> Int
     var _fn_errmsg: def(Int) thin abi("C") -> Int
     var _fn_exec:   def(Int, Int, Int, Int, Int) thin abi("C") -> Int32
 
@@ -234,6 +237,15 @@ struct Sqlite3FFI(Movable):
         ](self._lib, "sqlite3_bind_text")
         self._fn_bind_null = _dl_sym[def(Int, Int32) thin abi("C") -> Int32](
             self._lib, "sqlite3_bind_null"
+        )
+        self._fn_changes = _dl_sym[def(Int) thin abi("C") -> Int32](
+            self._lib, "sqlite3_changes"
+        )
+        self._fn_total_changes = _dl_sym[def(Int) thin abi("C") -> Int32](
+            self._lib, "sqlite3_total_changes"
+        )
+        self._fn_last_rowid = _dl_sym[def(Int) thin abi("C") -> Int](
+            self._lib, "sqlite3_last_insert_rowid"
         )
         self._fn_col_count = _dl_sym[def(Int) thin abi("C") -> Int32](
             self._lib, "sqlite3_column_count"
@@ -506,6 +518,42 @@ struct Sqlite3FFI(Movable):
             Column count.
         """
         return Int(self._fn_col_count(stmt))
+
+    def changes(self, db: Int) abi("C") -> Int:
+        """Return the rows inserted, updated or deleted by the most recent statement.
+
+        Args:
+            db: sqlite3 handle.
+
+        Returns:
+            Row count from ``sqlite3_changes``. Statements that modify nothing
+            report 0, which is how a guarded ``UPDATE ... WHERE`` reports that
+            it lost a race.
+        """
+        return Int(self._fn_changes(db))
+
+    def total_changes(self, db: Int) abi("C") -> Int:
+        """Return rows changed by all statements since the connection opened.
+
+        Args:
+            db: sqlite3 handle.
+
+        Returns:
+            Cumulative row count from ``sqlite3_total_changes``.
+        """
+        return Int(self._fn_total_changes(db))
+
+    def last_insert_rowid(self, db: Int) abi("C") -> Int:
+        """Return the rowid of the most recent successful INSERT.
+
+        Args:
+            db: sqlite3 handle.
+
+        Returns:
+            Rowid from ``sqlite3_last_insert_rowid``; 0 if no row has been
+            inserted on this connection.
+        """
+        return Int(self._fn_last_rowid(db))
 
     def column_type(self, stmt: Int, col: Int) abi("C") -> Int:
         """Return the SQLite type code of a column value (0-based index).

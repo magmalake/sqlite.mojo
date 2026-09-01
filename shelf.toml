@@ -1,5 +1,5 @@
 name = "sqlite-mojo"
-version = "0.3.0"
+version = "0.3.1"
 description = "SQLite bindings for Mojo via FFI: connections, prepared statements, RAII transactions"
 tags = ["sqlite", "database", "sql", "ffi", "magmalake", "iceberg", "catalog"]
 # other tins this one depends on; omit if none
