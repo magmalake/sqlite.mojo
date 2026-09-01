@@ -64,6 +64,8 @@ pixi shelf add sqlite-mojo   # or add the dependency by hand, as above
 pixi install
 ```
 
+Working with a coding agent? `npx skills add mojoshelf/mojoshelf --skill mojoshelf-consume --yes` teaches it to find and install tins itself — it installs the `shelf` CLI too.
+
 The conda package is **`sqlite-mojo`** (conda-forge owns the name `sqlite`);
 the Mojo import stays `from sqlite import …`. Nothing else to install — the C
 library comes along as a normal conda dependency.
