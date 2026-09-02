@@ -88,7 +88,8 @@ struct Xoshiro256(Movable):
 
 
 def _sql_tokens() -> List[String]:
-    """SQL metacharacters and injection payloads, over-represented on purpose."""
+    """SQL metacharacters and injection payloads, over-represented on purpose.
+    """
     var out: List[String] = [
         String("'"),
         String('"'),

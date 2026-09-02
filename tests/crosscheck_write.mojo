@@ -25,7 +25,8 @@ def main() raises:
 
     var tx = db.transaction()
     var stmt = db.prepare(
-        "INSERT INTO widgets (id, name, qty, ratio, note) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO widgets (id, name, qty, ratio, note) VALUES (?, ?, ?,"
+        " ?, ?)"
     )
 
     # (id, name, qty, ratio, note) -- note is NULL on the middle row, and the

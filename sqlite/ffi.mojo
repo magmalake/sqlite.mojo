@@ -28,8 +28,8 @@ from std.memory import UnsafePointer, Pointer
 # Result codes
 # -----------------------------------------------------------------------
 
-comptime SQLITE_OK   = 0
-comptime SQLITE_ROW  = 100
+comptime SQLITE_OK = 0
+comptime SQLITE_ROW = 100
 comptime SQLITE_DONE = 101
 
 # -----------------------------------------------------------------------
@@ -37,10 +37,10 @@ comptime SQLITE_DONE = 101
 # -----------------------------------------------------------------------
 
 comptime SQLITE_INTEGER = 1
-comptime SQLITE_FLOAT   = 2
-comptime SQLITE_TEXT    = 3
-comptime SQLITE_BLOB    = 4
-comptime SQLITE_NULL    = 5
+comptime SQLITE_FLOAT = 2
+comptime SQLITE_TEXT = 3
+comptime SQLITE_BLOB = 4
+comptime SQLITE_NULL = 5
 
 
 # -----------------------------------------------------------------------
@@ -155,32 +155,32 @@ struct Sqlite3FFI(Movable):
     var _lib: OwnedDLHandle
 
     # -- connection functions ------------------------------------------------
-    var _fn_open:   def(Int, Int) thin abi("C") -> Int32
-    var _fn_close:  def(Int) thin abi("C") -> Int32
+    var _fn_open: def(Int, Int) thin abi("C") -> Int32
+    var _fn_close: def(Int) thin abi("C") -> Int32
     var _fn_changes: def(Int) thin abi("C") -> Int32
     var _fn_total_changes: def(Int) thin abi("C") -> Int32
     var _fn_last_rowid: def(Int) thin abi("C") -> Int
     var _fn_errmsg: def(Int) thin abi("C") -> Int
-    var _fn_exec:   def(Int, Int, Int, Int, Int) thin abi("C") -> Int32
+    var _fn_exec: def(Int, Int, Int, Int, Int) thin abi("C") -> Int32
 
     # -- prepared statement functions ----------------------------------------
-    var _fn_prepare:  def(Int, Int, Int32, Int, Int) thin abi("C") -> Int32
-    var _fn_step:     def(Int) thin abi("C") -> Int32
-    var _fn_reset:    def(Int) thin abi("C") -> Int32
+    var _fn_prepare: def(Int, Int, Int32, Int, Int) thin abi("C") -> Int32
+    var _fn_step: def(Int) thin abi("C") -> Int32
+    var _fn_reset: def(Int) thin abi("C") -> Int32
     var _fn_finalize: def(Int) thin abi("C") -> Int32
 
     # -- parameter binding (1-based index) -----------------------------------
-    var _fn_bind_int:    def(Int, Int32, Int) thin abi("C") -> Int32
+    var _fn_bind_int: def(Int, Int32, Int) thin abi("C") -> Int32
     var _fn_bind_double: def(Int, Int32, Float64) thin abi("C") -> Int32
-    var _fn_bind_text:   def(Int, Int32, Int, Int32, Int) thin abi("C") -> Int32
-    var _fn_bind_null:   def(Int, Int32) thin abi("C") -> Int32
+    var _fn_bind_text: def(Int, Int32, Int, Int32, Int) thin abi("C") -> Int32
+    var _fn_bind_null: def(Int, Int32) thin abi("C") -> Int32
 
     # -- column reading (0-based index) --------------------------------------
-    var _fn_col_count:  def(Int) thin abi("C") -> Int32
-    var _fn_col_type:   def(Int, Int32) thin abi("C") -> Int32
-    var _fn_col_int64:  def(Int, Int32) thin abi("C") -> Int
+    var _fn_col_count: def(Int) thin abi("C") -> Int32
+    var _fn_col_type: def(Int, Int32) thin abi("C") -> Int32
+    var _fn_col_int64: def(Int, Int32) thin abi("C") -> Int
     var _fn_col_double: def(Int, Int32) thin abi("C") -> Float64
-    var _fn_col_text:   def(Int, Int32) thin abi("C") -> Int
+    var _fn_col_text: def(Int, Int32) thin abi("C") -> Int
 
     def __init__(out self, lib_path: String = "") raises:
         """Load ``libsqlite3`` and resolve all function pointers.
@@ -256,9 +256,9 @@ struct Sqlite3FFI(Movable):
         self._fn_col_int64 = _dl_sym[def(Int, Int32) thin abi("C") -> Int](
             self._lib, "sqlite3_column_int64"
         )
-        self._fn_col_double = _dl_sym[
-            def(Int, Int32) thin abi("C") -> Float64
-        ](self._lib, "sqlite3_column_double")
+        self._fn_col_double = _dl_sym[def(Int, Int32) thin abi("C") -> Float64](
+            self._lib, "sqlite3_column_double"
+        )
         self._fn_col_text = _dl_sym[def(Int, Int32) thin abi("C") -> Int](
             self._lib, "sqlite3_column_text"
         )
@@ -299,7 +299,13 @@ struct Sqlite3FFI(Movable):
         )
         _ = buf^  # keep buf alive past the FFI call
         if Int(rc) != SQLITE_OK:
-            raise Error("sqlite3_open('" + filename + "') failed (sqlite3 rc=" + String(Int(rc)) + ")")
+            raise Error(
+                "sqlite3_open('"
+                + filename
+                + "') failed (sqlite3 rc="
+                + String(Int(rc))
+                + ")"
+            )
         return db_out[0]
 
     def close(self, db: Int) abi("C") -> Int32:
@@ -356,9 +362,13 @@ struct Sqlite3FFI(Movable):
         if rc != SQLITE_OK:
             var db_err = self.errmsg(db)
             raise Error(
-                "sqlite3_exec failed: " + sql
-                + " -- " + db_err
-                + " (sqlite3 rc=" + String(Int(rc)) + ")"
+                "sqlite3_exec failed: "
+                + sql
+                + " -- "
+                + db_err
+                + " (sqlite3 rc="
+                + String(Int(rc))
+                + ")"
             )
 
     # -- prepared statements -------------------------------------------------
@@ -393,17 +403,21 @@ struct Sqlite3FFI(Movable):
         var rc = self._fn_prepare(
             db,
             Int(s.unsafe_ptr()),
-            sql_len,           # explicit byte count — do not use -1
+            sql_len,  # explicit byte count — do not use -1
             Int(stmt_out.unsafe_ptr()),
             Int(0),
         )
-        _ = s^                 # keep s alive until after the FFI call
+        _ = s^  # keep s alive until after the FFI call
         if Int(rc) != SQLITE_OK:
             var db_err = self.errmsg(db)
             raise Error(
-                "sqlite3_prepare_v2 failed: " + sql
-                + " -- " + db_err
-                + " (sqlite3 rc=" + String(Int(rc)) + ")"
+                "sqlite3_prepare_v2 failed: "
+                + sql
+                + " -- "
+                + db_err
+                + " (sqlite3 rc="
+                + String(Int(rc))
+                + ")"
             )
         return stmt_out[0]
 

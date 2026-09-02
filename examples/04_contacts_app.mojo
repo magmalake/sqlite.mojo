@@ -54,7 +54,9 @@ comptime SCHEMA = String(
     ")"
 )
 
-comptime SELECT_COLS = String("SELECT id, name, email, phone, active FROM contacts")
+comptime SELECT_COLS = String(
+    "SELECT id, name, email, phone, active FROM contacts"
+)
 
 
 def _row_to_contact(imm row: Row) -> Contact:
@@ -71,12 +73,12 @@ def _row_to_contact(imm row: Row) -> Contact:
     )
 
 
-def _select(mut db: Database, var where: String) raises -> List[Contact]:
+def _select(mut db: Database, var where_clause: String) raises -> List[Contact]:
     """Run ``SELECT … FROM contacts`` with an optional ``WHERE`` clause."""
     var sql = SELECT_COLS
-    if where:
+    if where_clause:
         sql += " WHERE "
-        sql += where
+        sql += where_clause
     var stmt = db.prepare(sql)
     var out = List[Contact]()
     while True:
@@ -179,7 +181,9 @@ def _seed_contacts(mut db: Database) raises:
         raise e.copy()
 
 
-def _update_phone(mut db: Database, contact_id: Int, imm new_phone: String) raises:
+def _update_phone(
+    mut db: Database, contact_id: Int, imm new_phone: String
+) raises:
     """Set a new phone number for a contact by id (raw prepared statement)."""
     var stmt = db.prepare("UPDATE contacts SET phone = ? WHERE id = ?")
     stmt.bind_text(1, new_phone)

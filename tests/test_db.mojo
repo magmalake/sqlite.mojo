@@ -67,10 +67,7 @@ def test_execute_create_table() raises:
 def test_execute_multiple_statements() raises:
     """Multiple DDL statements separated by semicolons execute together."""
     var db = Database(":memory:")
-    db.execute(
-        "CREATE TABLE a (x INTEGER);"
-        "CREATE TABLE b (y TEXT)"
-    )
+    db.execute("CREATE TABLE a (x INTEGER);CREATE TABLE b (y TEXT)")
     db.execute("INSERT INTO a VALUES (1)")
     db.execute("INSERT INTO b VALUES ('hi')")
 
@@ -331,7 +328,8 @@ def test_bind_text_unicode() raises:
 
 
 def test_bind_text_single_quote() raises:
-    """Text with an embedded single quote round-trips via bind_text (injection safe)."""
+    """Text with an embedded single quote round-trips via bind_text (injection safe).
+    """
     var db = Database(":memory:")
     db.execute("CREATE TABLE t (val TEXT)")
     var dangerous = "O'Brien'; DROP TABLE t; --"
@@ -341,7 +339,9 @@ def test_bind_text_single_quote() raises:
 
     var q = db.prepare("SELECT val FROM t")
     ref row = q.step().value()
-    assert_equal(row.text_val(0), dangerous, "SQL injection chars should round-trip")
+    assert_equal(
+        row.text_val(0), dangerous, "SQL injection chars should round-trip"
+    )
 
 
 def test_bind_text_newline() raises:
@@ -371,7 +371,9 @@ def test_bind_text_large() raises:
 
     var q = db.prepare("SELECT val FROM t")
     ref row = q.step().value()
-    assert_equal(row.text_val(0).byte_length(), 1000, "Large string length mismatch")
+    assert_equal(
+        row.text_val(0).byte_length(), 1000, "Large string length mismatch"
+    )
     assert_equal(row.text_val(0), big)
 
 
@@ -604,7 +606,7 @@ def test_transaction_rollback() raises:
 # Being a separate function means its stack frame is torn down on raise,
 # which calls tx.__del__ (→ ROLLBACK) before the exception reaches the caller.
 def _tx_insert_then_raise(mut db: Database) raises:
-    var tx = db.transaction()           # BEGIN
+    var tx = db.transaction()  # BEGIN
     db.execute("INSERT INTO t VALUES (99)")
     _ = tx^  # ensure tx is consumed before raise
     raise Error("intentional test error")
@@ -620,10 +622,10 @@ def test_transaction_commit_guard() raises:
     var db = Database(":memory:")
     db.execute("CREATE TABLE t (v INTEGER)")
 
-    var tx = db.transaction()   # BEGIN
+    var tx = db.transaction()  # BEGIN
     db.execute("INSERT INTO t VALUES (1)")
     db.execute("INSERT INTO t VALUES (2)")
-    tx.commit()                 # COMMIT
+    tx.commit()  # COMMIT
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
@@ -635,9 +637,9 @@ def test_transaction_explicit_rollback() raises:
     var db = Database(":memory:")
     db.execute("CREATE TABLE t (v INTEGER)")
 
-    var tx = db.transaction()   # BEGIN
+    var tx = db.transaction()  # BEGIN
     db.execute("INSERT INTO t VALUES (99)")
-    tx.rollback()               # explicit ROLLBACK
+    tx.rollback()  # explicit ROLLBACK
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
@@ -656,13 +658,15 @@ def test_transaction_destruction_without_commit_rolls_back() raises:
     var db = Database(":memory:")
     db.execute("CREATE TABLE t (v INTEGER)")
 
-    var tx = db.transaction()               # BEGIN
+    var tx = db.transaction()  # BEGIN
     db.execute("INSERT INTO t VALUES (42)")
-    _ = tx^                                 # consume tx → __del__ → ROLLBACK
+    _ = tx^  # consume tx → __del__ → ROLLBACK
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
-    assert_equal(row.int_val(0), 0, "Destroying tx without commit must ROLLBACK")
+    assert_equal(
+        row.int_val(0), 0, "Destroying tx without commit must ROLLBACK"
+    )
 
 
 def test_transaction_explicit_rollback_in_except() raises:
@@ -677,7 +681,7 @@ def test_transaction_explicit_rollback_in_except() raises:
     var db = Database(":memory:")
     db.execute("CREATE TABLE t (v INTEGER)")
 
-    var tx = db.transaction()           # BEGIN
+    var tx = db.transaction()  # BEGIN
     try:
         db.execute("INSERT INTO t VALUES (99)")
         raise Error("intentional test error")
@@ -686,7 +690,9 @@ def test_transaction_explicit_rollback_in_except() raises:
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
-    assert_equal(row.int_val(0), 0, "Explicit rollback in except must revert INSERT")
+    assert_equal(
+        row.int_val(0), 0, "Explicit rollback in except must revert INSERT"
+    )
 
 
 def test_transaction_commit_is_idempotent() raises:
@@ -712,15 +718,18 @@ def test_transaction_rollback_after_commit_is_noop() raises:
     var tx = db.transaction()
     db.execute("INSERT INTO t VALUES (5)")
     tx.commit()
-    tx.rollback()   # should not undo the already-committed data
+    tx.rollback()  # should not undo the already-committed data
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
-    assert_equal(row.int_val(0), 1, "commit() then rollback() should not undo data")
+    assert_equal(
+        row.int_val(0), 1, "commit() then rollback() should not undo data"
+    )
 
 
 def test_transaction_atomicity_multiple_inserts() raises:
-    """All inserts in a committed transaction are visible; none if rolled back."""
+    """All inserts in a committed transaction are visible; none if rolled back.
+    """
     var db = Database(":memory:")
     db.execute("CREATE TABLE t (v INTEGER)")
 
@@ -755,7 +764,7 @@ def test_transaction_error_leaves_table_empty() raises:
     var db = Database(":memory:")
     db.execute("CREATE TABLE real_table (v INTEGER)")
 
-    var tx = db.transaction()           # BEGIN
+    var tx = db.transaction()  # BEGIN
     try:
         db.execute("INSERT INTO real_table VALUES (1)")
         var _ = db.prepare("SELECT * FROM no_such_table")  # raises
@@ -765,7 +774,9 @@ def test_transaction_error_leaves_table_empty() raises:
 
     var q = db.prepare("SELECT COUNT(*) FROM real_table")
     ref row = q.step().value()
-    assert_equal(row.int_val(0), 0, "rollback() in except must revert the valid INSERT")
+    assert_equal(
+        row.int_val(0), 0, "rollback() in except must revert the valid INSERT"
+    )
 
 
 # -----------------------------------------------------------------------
@@ -790,7 +801,9 @@ def test_with_transaction_auto_commit() raises:
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
-    assert_equal(row.int_val(0), 3, "all rows must be committed on clean with-exit")
+    assert_equal(
+        row.int_val(0), 3, "all rows must be committed on clean with-exit"
+    )
 
 
 def test_with_transaction_auto_rollback_on_raise() raises:
@@ -811,7 +824,9 @@ def test_with_transaction_auto_rollback_on_raise() raises:
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
-    assert_equal(row.int_val(0), 0, "with block must auto-rollback on exception")
+    assert_equal(
+        row.int_val(0), 0, "with block must auto-rollback on exception"
+    )
 
 
 def test_with_transaction_pre_rollback_then_with_exits_cleanly() raises:
@@ -827,11 +842,13 @@ def test_with_transaction_pre_rollback_then_with_exits_cleanly() raises:
 
     var tx = db.transaction()
     db.execute("INSERT INTO t VALUES (7)")
-    tx.rollback()           # marks _done=True; __del__ is now a no-op
+    tx.rollback()  # marks _done=True; __del__ is now a no-op
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
-    assert_equal(row.int_val(0), 0, "rollback before scope exit must revert INSERT")
+    assert_equal(
+        row.int_val(0), 0, "rollback before scope exit must revert INSERT"
+    )
 
 
 def test_with_transaction_commit_makes_exit_noop() raises:
@@ -845,15 +862,20 @@ def test_with_transaction_commit_makes_exit_noop() raises:
 
     var tx = db.transaction()
     db.execute("INSERT INTO t VALUES (5)")
-    tx.commit()             # _done=True; __del__ is now a no-op
+    tx.commit()  # _done=True; __del__ is now a no-op
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
-    assert_equal(row.int_val(0), 1, "commit must persist INSERT; __del__ must not rollback")
+    assert_equal(
+        row.int_val(0),
+        1,
+        "commit must persist INSERT; __del__ must not rollback",
+    )
 
 
 def test_with_transaction_rollback_does_not_affect_prior_commit() raises:
-    """A failed ``with`` block does not roll back data from a prior committed transaction."""
+    """A failed ``with`` block does not roll back data from a prior committed transaction.
+    """
     var db = Database(":memory:")
     db.execute("CREATE TABLE t (v INTEGER)")
 
@@ -871,11 +893,14 @@ def test_with_transaction_rollback_does_not_affect_prior_commit() raises:
 
     var q = db.prepare("SELECT COUNT(*) FROM t")
     ref row = q.step().value()
-    assert_equal(row.int_val(0), 1, "prior committed row must survive a later rollback")
+    assert_equal(
+        row.int_val(0), 1, "prior committed row must survive a later rollback"
+    )
 
 
 def test_transaction_prepared_insert_atomicity() raises:
-    """Two prepared inserts in a transaction are both committed or both rolled back."""
+    """Two prepared inserts in a transaction are both committed or both rolled back.
+    """
     var db = Database(":memory:")
     db.execute("CREATE TABLE items (label TEXT, qty INTEGER)")
 
@@ -922,7 +947,8 @@ def test_last_error_after_open() raises:
 
 def test_changes_and_last_insert_rowid() raises:
     """changes() counts the rows a statement touched; a guarded update that
-    matches nothing reports 0, which is what optimistic concurrency relies on."""
+    matches nothing reports 0, which is what optimistic concurrency relies on.
+    """
     var db = Database(":memory:")
     db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
 
@@ -946,6 +972,7 @@ def test_changes_and_last_insert_rowid() raises:
     assert_equal(db.changes(), 2)
 
     assert_true(db.total_changes() >= 7)
+
 
 def main() raises:
     # Lifecycle
@@ -1066,15 +1093,25 @@ def main() raises:
 
     # Transaction context manager
     test_with_transaction_auto_commit()
-    print("test_with_transaction_auto_commit                              PASSED")
+    print(
+        "test_with_transaction_auto_commit                              PASSED"
+    )
     test_with_transaction_auto_rollback_on_raise()
-    print("test_with_transaction_auto_rollback_on_raise                   PASSED")
+    print(
+        "test_with_transaction_auto_rollback_on_raise                   PASSED"
+    )
     test_with_transaction_pre_rollback_then_with_exits_cleanly()
-    print("test_with_transaction_pre_rollback_then_with_exits_cleanly     PASSED")
+    print(
+        "test_with_transaction_pre_rollback_then_with_exits_cleanly     PASSED"
+    )
     test_with_transaction_commit_makes_exit_noop()
-    print("test_with_transaction_commit_makes_exit_noop                   PASSED")
+    print(
+        "test_with_transaction_commit_makes_exit_noop                   PASSED"
+    )
     test_with_transaction_rollback_does_not_affect_prior_commit()
-    print("test_with_transaction_rollback_does_not_affect_prior_commit    PASSED")
+    print(
+        "test_with_transaction_rollback_does_not_affect_prior_commit    PASSED"
+    )
 
     # last_error
     test_last_error_after_open()

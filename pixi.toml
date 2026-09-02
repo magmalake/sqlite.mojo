@@ -40,7 +40,12 @@ examples = { depends-on = [
 ] }
 
 format = "mojo format sqlite tests examples"
-format-check = "mojo format --check sqlite tests examples"
+fmt = { cmd = "mojo format sqlite tests examples" }
+# `mojo format` has no check mode in 1.0.0 — it rejects `--check`, and there is
+# none among the hidden options either — so the check is: format, then assert the
+# tree did not move. It rewrites the files as a side effect, which is what CI
+# wants and is harmless locally; run it with your own work committed or stashed.
+format-check = { cmd = "mojo format sqlite tests examples && git diff --exit-code -- sqlite tests examples" }
 
 # ── pixi-build: consumable as a pixi source dependency ──────────────────────
 # Conda package name is sqlite-mojo (conda-forge owns "sqlite"); the Mojo
