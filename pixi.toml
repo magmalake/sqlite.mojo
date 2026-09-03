@@ -16,6 +16,10 @@ platforms = ["osx-arm64", "linux-64"]
 # shell built on top of it, used here only by the cross-check test.
 libsqlite = ">=3.45,<4"
 sqlite = ">=3.45,<4"
+# Added by `pixi shelf add lint-mojo`: the linter comes from GitHub as a pixi
+# source dependency pinned at the revision mojoshelf published, and builds
+# the `mojolint` executable into every environment next to mojo-lsp-server.
+lint-mojo = { git = "https://github.com/magmalake/lint.mojo.git", rev = "2a12807b7847984aff2c8bf148b0eb7515a99844" }
 
 [tasks]
 test-db = "mojo run -I . tests/test_db.mojo"
@@ -25,6 +29,10 @@ test-fuzz = "mojo run -I . tests/test_fuzz.mojo"
 # self-consistent ones.
 test-crosscheck = "sh tests/crosscheck.sh"
 test = { depends-on = ["test-db", "test-fuzz", "test-crosscheck"] }
+
+# mojolint (lint-mojo, below): the origin and threading mistakes the compiler
+# lets through, with mojo-lsp-server behind the rules. Exit 1 on findings.
+lint = { cmd = "mojolint --lsp -I . sqlite tests examples" }
 
 example-01 = "mojo run -I . examples/01_hello_sqlite.mojo"
 example-02 = "mojo run -I . examples/02_prepared_statements.mojo"
