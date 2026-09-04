@@ -317,7 +317,7 @@ struct Statement(Movable):
         """Compile a SQL statement.
 
         Args:
-            db:  sqlite3 handle of the owning connection.
+            db:  ``sqlite3`` handle of the owning connection.
             sql: A single SQL statement (no trailing semicolon needed).
 
         Raises:
@@ -530,7 +530,7 @@ struct Database(Movable):
             var tx = db.transaction()
             db.execute("INSERT INTO orders VALUES (1, 'Alice')")
             db.execute("INSERT INTO line_items VALUES (1, 42, 3)")
-            tx.commit()   # both rows committed atomically
+            tx.commit()   # both rows committed atomically.
         """
         return Transaction(self._handle)
 

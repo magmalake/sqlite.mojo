@@ -3,7 +3,7 @@
 All sqlite3 handles (``sqlite3*`` and ``sqlite3_stmt*``) are stored as
 ``Int`` (pointer address).  Input C strings are passed as ``Int`` via
 ``unsafe_ptr() → Int`` cast.  Output C-string return values are received
-as ``UnsafePointer[UInt8, MutUntrackedOrigin]`` and immediately copied
+as ``Pointer[UInt8, MutUntrackedOrigin]`` and immediately copied
 into owned ``String`` values via ``StringSlice``.
 
 The library is loaded at runtime via ``OwnedDLHandle`` so Mojo's JIT
@@ -21,7 +21,7 @@ Do not call ``Sqlite3FFI`` methods from user code -- use ``db.mojo``.
 from std.ffi import _Global, OwnedDLHandle, RTLD, CStringSlice
 from std.os import abort, getenv
 from std.sys.info import CompilationTarget
-from std.memory import UnsafePointer, Pointer
+from std.memory import Pointer
 
 
 # -----------------------------------------------------------------------
@@ -63,7 +63,7 @@ def _ptr_to_string(addr: Int) -> String:
     """
     if addr == 0:
         return String("")
-    var p = UnsafePointer[Int8, MutUntrackedOrigin](unsafe_from_address=addr)
+    var p = Pointer[Int8, MutUntrackedOrigin](unsafe_from_address=addr)
     return String(StringSlice(unsafe_from_utf8=CStringSlice(unsafe_from_ptr=p)))
 
 
@@ -132,7 +132,7 @@ struct Sqlite3FFI(Movable):
     every function pointer once.  All opaque pointer arguments (``sqlite3*``,
     ``sqlite3_stmt*``) are represented as ``Int`` (64-bit on all supported
     platforms), matching the C ABI on x86-64 and arm64 without requiring
-    ``UnsafePointer`` type annotations.
+    ``Pointer`` type annotations.
 
     **Construct this exactly once per process** -- reach it through
     ``sqlite_ffi()``, which returns a borrow of the ``_Global`` instance.
@@ -280,7 +280,7 @@ struct Sqlite3FFI(Movable):
             filename: File path or ``:memory:`` for an in-memory database.
 
         Returns:
-            sqlite3 connection handle as ``Int``.
+            ``sqlite3`` connection handle as ``Int``.
 
         Raises:
             Error: If ``sqlite3_open`` returns a non-zero code.
@@ -312,7 +312,7 @@ struct Sqlite3FFI(Movable):
         """Close the database connection.
 
         Args:
-            db: sqlite3 handle.
+            db: ``sqlite3`` handle.
 
         Returns:
             SQLite result code.
@@ -323,7 +323,7 @@ struct Sqlite3FFI(Movable):
         """Return the most recent error message for the connection.
 
         Args:
-            db: sqlite3 handle.
+            db: ``sqlite3`` handle.
 
         Returns:
             Human-readable error string (empty if ``db`` is 0).
@@ -343,7 +343,7 @@ struct Sqlite3FFI(Movable):
         contain stale bytes after the logical string end.
 
         Args:
-            db:  sqlite3 handle.
+            db:  ``sqlite3`` handle.
             sql: Semicolon-separated SQL text (DDL, DML, PRAGMA, etc.).
 
         Raises:
@@ -387,11 +387,11 @@ struct Sqlite3FFI(Movable):
         (e.g. ``near "NTEGER": syntax error``).
 
         Args:
-            db:  sqlite3 handle.
+            db:  ``sqlite3`` handle.
             sql: A single SQL statement (without trailing semicolon).
 
         Returns:
-            sqlite3_stmt handle as ``Int``.
+            ``sqlite3_stmt`` handle as ``Int``.
 
         Raises:
             Error: If compilation fails.
@@ -425,7 +425,7 @@ struct Sqlite3FFI(Movable):
         """Advance a prepared statement by one step.
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
 
         Returns:
             ``SQLITE_ROW``, ``SQLITE_DONE``, or an error code.
@@ -436,7 +436,7 @@ struct Sqlite3FFI(Movable):
         """Reset a prepared statement for re-execution.
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
 
         Returns:
             SQLite result code.
@@ -447,7 +447,7 @@ struct Sqlite3FFI(Movable):
         """Destroy a prepared statement and free its resources.
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
         """
         _ = self._fn_finalize(stmt)
 
@@ -459,7 +459,7 @@ struct Sqlite3FFI(Movable):
         Wraps ``sqlite3_bind_int64``.
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
             idx:  Parameter index (1-based).
             val:  Integer value.
 
@@ -473,7 +473,7 @@ struct Sqlite3FFI(Movable):
         """Bind a floating-point value to a statement parameter.
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
             idx:  Parameter index (1-based).
             val:  Float64 value.
 
@@ -491,7 +491,7 @@ struct Sqlite3FFI(Movable):
         where reused buffers may contain stale bytes after the logical end.
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
             idx:  Parameter index (1-based).
             val:  String value (copied by SQLite).
 
@@ -511,7 +511,7 @@ struct Sqlite3FFI(Movable):
         """Bind SQL NULL to a statement parameter.
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
             idx:  Parameter index (1-based).
 
         Raises:
@@ -526,7 +526,7 @@ struct Sqlite3FFI(Movable):
         """Return the number of columns in the current result row.
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
 
         Returns:
             Column count.
@@ -537,7 +537,7 @@ struct Sqlite3FFI(Movable):
         """Return the rows inserted, updated or deleted by the most recent statement.
 
         Args:
-            db: sqlite3 handle.
+            db: ``sqlite3`` handle.
 
         Returns:
             Row count from ``sqlite3_changes``. Statements that modify nothing
@@ -550,7 +550,7 @@ struct Sqlite3FFI(Movable):
         """Return rows changed by all statements since the connection opened.
 
         Args:
-            db: sqlite3 handle.
+            db: ``sqlite3`` handle.
 
         Returns:
             Cumulative row count from ``sqlite3_total_changes``.
@@ -561,7 +561,7 @@ struct Sqlite3FFI(Movable):
         """Return the rowid of the most recent successful INSERT.
 
         Args:
-            db: sqlite3 handle.
+            db: ``sqlite3`` handle.
 
         Returns:
             Rowid from ``sqlite3_last_insert_rowid``; 0 if no row has been
@@ -573,7 +573,7 @@ struct Sqlite3FFI(Movable):
         """Return the SQLite type code of a column value (0-based index).
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
             col:  Column index (0-based).
 
         Returns:
@@ -586,7 +586,7 @@ struct Sqlite3FFI(Movable):
         """Read an integer column value (0-based index).
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
             col:  Column index (0-based).
 
         Returns:
@@ -598,7 +598,7 @@ struct Sqlite3FFI(Movable):
         """Read a floating-point column value (0-based index).
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
             col:  Column index (0-based).
 
         Returns:
@@ -610,7 +610,7 @@ struct Sqlite3FFI(Movable):
         """Read a text column value (0-based index).
 
         Args:
-            stmt: sqlite3_stmt handle.
+            stmt: ``sqlite3_stmt`` handle.
             col:  Column index (0-based).
 
         Returns:
