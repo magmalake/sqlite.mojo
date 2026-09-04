@@ -946,7 +946,7 @@ def test_last_error_after_open() raises:
 
 
 def test_changes_and_last_insert_rowid() raises:
-    """changes() counts the rows a statement touched; a guarded update that
+    """``changes()`` counts the rows a statement touched; a guarded update that
     matches nothing reports 0, which is what optimistic concurrency relies on.
     """
     var db = Database(":memory:")
