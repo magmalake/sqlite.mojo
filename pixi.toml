@@ -5,7 +5,7 @@ authors = [
 ]
 channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 name = "sqlite.mojo"
-version = "0.3.1"
+version = "0.3.2"
 description = "A Mojo binding to SQLite (libsqlite3) via FFI: connections, prepared statements, and RAII transactions."
 preview = ["pixi-build"]
 platforms = ["osx-arm64", "linux-64"]
@@ -60,7 +60,7 @@ format-check = { cmd = "mojo format sqlite tests examples && git diff --exit-cod
 # import stays `from sqlite import …`.
 [package]
 name = "sqlite-mojo"
-version = "0.3.1"
+version = "0.3.2"
 
 [package.build]
 backend = { name = "pixi-build-mojo", version = "0.*" }
