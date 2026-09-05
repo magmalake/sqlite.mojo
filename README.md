@@ -30,7 +30,7 @@ needs is never declared. This fork is deliberately dependency-free instead:
   `pixi shelf add sqlite-mojo` gives you something that compiles.
 - The property tests carry their own generators (a seeded xoshiro256\*\*) in
   place of mozz, and the ORM examples were rewritten against the safe API.
-- `pixi build` produces a real `sqlite.mojopkg` via the `pixi-build-mojo`
+- `pixi build` produces a real `sqlite.mojoc` via the `pixi-build-mojo`
   backend, rather than copying raw source into the prefix.
 - libsqlite3 is `dlopen`ed **once per process** rather than once per
   `Database`, `Statement` and `Transaction` — see [Performance](#performance).
