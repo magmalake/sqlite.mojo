@@ -18,7 +18,7 @@ cost of preparing a query dwarf the query itself.
 Do not call ``Sqlite3FFI`` methods from user code -- use ``db.mojo``.
 """
 
-from std.ffi import _Global, OwnedDLHandle, RTLD, CStringSlice
+from std.ffi import _Global, OwnedDLHandle, RTLD, CStringSpan
 from std.os import abort, getenv
 from std.sys.info import CompilationTarget
 from std.memory import Pointer
@@ -64,7 +64,7 @@ def _ptr_to_string(addr: Int) -> String:
     if addr == 0:
         return String("")
     var p = Pointer[Int8, MutUntrackedOrigin](unsafe_from_address=addr)
-    return String(StringSlice(unsafe_from_utf8=CStringSlice(unsafe_from_ptr=p)))
+    return String(StringSlice(unsafe_from_utf8=CStringSpan(unsafe_from_ptr=p)))
 
 
 def _dl_sym[

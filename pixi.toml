@@ -49,7 +49,7 @@ examples = { depends-on = [
 
 format = "mojo format sqlite tests examples"
 fmt = { cmd = "mojo format sqlite tests examples" }
-# `mojo format` has no check mode in 1.0.0 — it rejects `--check`, and there is
+# `mojo format` has no check mode in 1.1.0 — it rejects `--check`, and there is
 # none among the hidden options either — so the check is: format, then assert the
 # tree did not move. It rewrites the files as a side effect, which is what CI
 # wants and is harmless locally; run it with your own work committed or stashed.
@@ -70,22 +70,22 @@ path = "sqlite"
 name = "sqlite"
 
 [package.host-dependencies]
-mojo-compiler = "==1.0.0"
+mojo-compiler = "==1.1.0"
 libsqlite = ">=3.45,<4"
 
 [package.build-dependencies]
-mojo-compiler = "==1.0.0"
+mojo-compiler = "==1.1.0"
 
 [package.run-dependencies]
-mojo-compiler = ">=1.0.0,<2"
+mojo-compiler = ">=1.1.0,<2"
 libsqlite = ">=3.45,<4"
 
 # ── stable / nightly toolchain matrix (see CI) ──────────────────────────────
 [feature.nightly.dependencies]
-modular = ">=26.6.0.dev2026082605,<27"
+modular = ">=26.7.0.dev2026092005,<28"
 
 [feature.stable.dependencies]
-mojo-compiler = "==1.0.0"
+mojo-compiler = "==1.1.0"
 
 [environments]
 default = ["nightly"]
