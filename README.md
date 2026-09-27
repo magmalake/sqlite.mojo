@@ -161,10 +161,10 @@ and expensive enough to dominate everything around it.
 
 ## Correctness
 
-- **51 unit tests** over the lifecycle, every bind and column variant, text and
+- **Unit tests** over the lifecycle, every bind and column variant, text and
   integer and float edge cases, NULL handling, statement reuse, DML, and all
   the transaction paths including the context-manager ones.
-- **7 property tests, 13 500 trials**: arbitrary UTF-8 and arbitrary bytes
+- **Property tests, 13 500 trials**: arbitrary UTF-8 and arbitrary bytes
   executed as SQL never crash; `bind_text` / `bind_int` / `bind_float` round-trip
   exactly; `COUNT(*)` matches the inserts; and no `bind_text` payload can escape
   its placeholder to run as SQL.
@@ -174,7 +174,7 @@ and expensive enough to dominate everything around it.
   back one the shell wrote. Verified against CPython's `sqlite3` module too
   (libsqlite 3.50.4, a different build from the one the binding loads).
 
-Everything above runs on **both** Mojo 1.0.0 (stable) and the current nightly,
+Everything above runs on **both** Mojo 1.1.0 (stable) and the current nightly,
 on Linux and macOS.
 
 ## Examples
@@ -200,13 +200,13 @@ no connection pooling, no async, and no query builder.
 
 ```bash
 pixi run test              # db suite + property suite + sqlite3 cross-check
-pixi run test-db           # 51 unit tests
-pixi run test-fuzz         # 7 properties, 13 500 trials
+pixi run test-db           # unit tests
+pixi run test-fuzz         # property tests, 13 500 trials
 pixi run test-crosscheck   # round-trip against the sqlite3 shell
 pixi run examples          # run all five examples
 pixi run format            # auto-format source
 
-pixi run -e stable test    # the same, on Mojo 1.0.0 instead of nightly
+pixi run -e stable test    # the same, on Mojo 1.1.0 instead of nightly
 ```
 
 ## License
