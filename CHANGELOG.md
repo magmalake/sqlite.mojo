@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.5 - 2026-11-03
+
 - libsqlite3 is found without `CONDA_PREFIX`: after `$CONDA_PREFIX/lib`,
   the tin looks next to the executable, in its `../lib`, and then asks the
   dynamic linker, which searches the binary's rpath (the environment
