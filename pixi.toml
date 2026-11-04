@@ -28,7 +28,11 @@ test-fuzz = "mojo run -I . tests/test_fuzz.mojo"
 # files this binding writes are genuine SQLite databases, not merely
 # self-consistent ones.
 test-crosscheck = "sh tests/crosscheck.sh"
-test = { depends-on = ["test-db", "test-fuzz", "test-crosscheck"] }
+# Built, not `mojo run`, and run twice, the second time with CONDA_PREFIX
+# unset: libsqlite3 must then be found through the binary's rpath, as from a
+# plain shell.
+test-dlopen = "mkdir -p build && mojo build -I . tests/test_dlopen.mojo -o build/test_dlopen && ./build/test_dlopen && env -u CONDA_PREFIX ./build/test_dlopen"
+test = { depends-on = ["test-db", "test-fuzz", "test-crosscheck", "test-dlopen"] }
 
 # mojolint (lint-mojo, below): the origin and threading mistakes the compiler
 # lets through, with mojo-lsp-server behind the rules. Exit 1 on findings.
