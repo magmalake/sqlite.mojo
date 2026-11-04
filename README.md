@@ -34,6 +34,11 @@ needs is never declared. This fork is deliberately dependency-free instead:
   backend, rather than copying raw source into the prefix.
 - libsqlite3 is `dlopen`ed **once per process** rather than once per
   `Database`, `Statement` and `Transaction` — see [Performance](#performance).
+- libsqlite3 is found with or without `CONDA_PREFIX` (`sqlite/_dlopen.mojo`:
+  `$CONDA_PREFIX/lib`, next to the executable and in its `../lib`, then the
+  binary's rpath, which `mojo build` points at the environment it built in),
+  and a library that can't be found is an Error saying to set
+  `CONDA_PREFIX`, not an abort.
 
 That is a scope difference, not a criticism.
 **If you want the ORM, use [upstream](https://github.com/ehsanmok/sqlite)** —

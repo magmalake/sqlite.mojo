@@ -19,9 +19,10 @@ Do not call ``Sqlite3FFI`` methods from user code -- use ``db.mojo``.
 """
 
 from std.ffi import _Global, OwnedDLHandle, RTLD, CStringSpan, c_char
-from std.os import abort, getenv
 from std.sys.info import CompilationTarget
 from std.memory import Pointer
+
+from ._dlopen import open_library
 
 
 # -----------------------------------------------------------------------
@@ -83,27 +84,16 @@ def _dl_sym[
     return Pointer(to=addr).unsafe_bitcast[FT]()[]
 
 
-def _find_sqlite3_library() -> String:
-    """Locate ``libsqlite3`` via ``$CONDA_PREFIX`` (pixi) or bare soname.
-
-    Search order:
-    1. ``$CONDA_PREFIX/lib/libsqlite3.so.0`` (Linux) or
-       ``$CONDA_PREFIX/lib/libsqlite3.dylib`` (macOS) when set.
-    2. Bare soname, relying on ``LD_LIBRARY_PATH`` / dyld path.
+def _sqlite3_soname() -> String:
+    """The platform's libsqlite3 file name, for `_dlopen.open_library`.
 
     Returns:
-        Library path string for ``OwnedDLHandle``.
+        ``libsqlite3.so.0`` on Linux, ``libsqlite3.dylib`` on macOS.
     """
-    var prefix = getenv("CONDA_PREFIX", "")
-    if prefix:
-        comptime if CompilationTarget.is_linux():
-            return prefix + "/lib/libsqlite3.so.0"
-        else:
-            return prefix + "/lib/libsqlite3.dylib"
     comptime if CompilationTarget.is_linux():
-        return "libsqlite3.so.0"
+        return String("libsqlite3.so.0")
     else:
-        return "libsqlite3.dylib"
+        return String("libsqlite3.dylib")
 
 
 def _check(rc: Int32, msg: String) raises:
@@ -186,21 +176,30 @@ struct Sqlite3FFI(Movable):
         """Load ``libsqlite3`` and resolve all function pointers.
 
         Args:
-            lib_path: Explicit path to the library.  If empty,
-                      ``_find_sqlite3_library()`` is used (honours
-                      ``$CONDA_PREFIX``).
+            lib_path: Explicit path to the library.  If empty, the soname is
+                      looked up by ``_dlopen.open_library``:
+                      ``$CONDA_PREFIX/lib``, next to the executable and in
+                      its ``../lib``, then the dynamic linker's search path
+                      (the build environment's lib via the binary's rpath,
+                      then the system), so it works with or without
+                      ``$CONDA_PREFIX``.
 
         Raises:
-            Error: If the library cannot be opened or a symbol is missing.
+            Error: If the library cannot be opened (the message names every
+                place searched and says to set ``CONDA_PREFIX``) or a symbol
+                is missing.
         """
-        var path = lib_path if lib_path else _find_sqlite3_library()
         # RTLD.NODELETE: dlclose() becomes a no-op for this handle.
         # Without it, each Database destruction calls dlclose() which on
         # some platforms fully unloads libsqlite3, wiping all VFS state,
         # WAL locks, and shared-memory mappings.  This causes "no such
         # table" and SQLITE_CANTOPEN errors on subsequent open() calls.
         # The library stays resident until process exit regardless.
-        self._lib = OwnedDLHandle(path, RTLD.NOW | RTLD.GLOBAL | RTLD.NODELETE)
+        comptime FLAGS = RTLD.NOW | RTLD.GLOBAL | RTLD.NODELETE
+        if lib_path:
+            self._lib = OwnedDLHandle(lib_path, FLAGS)
+        else:
+            self._lib = open_library("sqlite.mojo", _sqlite3_soname(), FLAGS)
 
         self._fn_open = _dl_sym[def(Int, Int) thin abi("C") -> Int32](
             self._lib, "sqlite3_open"
@@ -625,12 +624,26 @@ struct Sqlite3FFI(Movable):
 # -----------------------------------------------------------------------
 
 
-def _open_ffi() -> Sqlite3FFI:
-    """``dlopen`` libsqlite3 and resolve every symbol, once, per process."""
-    try:
-        return Sqlite3FFI()
-    except e:
-        abort(String("sqlite.mojo: ", e))
+struct _Loaded(Movable):
+    """The process-wide ``Sqlite3FFI``, or why libsqlite3 couldn't be loaded."""
+
+    var ffi: Optional[Sqlite3FFI]
+    var error: String
+
+    def __init__(out self):
+        try:
+            self.ffi = Sqlite3FFI()
+            self.error = String("")
+        except e:
+            self.ffi = None
+            self.error = String(e)
+
+
+def _open_ffi() -> _Loaded:
+    """``dlopen`` libsqlite3 and resolve every symbol, once, per process.  A
+    failure is kept and raised by ``sqlite_ffi()`` on every use, never an
+    abort."""
+    return _Loaded()
 
 
 comptime _FFI = _Global["sqlite_mojo_libsqlite3", _open_ffi]
@@ -647,5 +660,12 @@ compiling the SQL it was there to compile.
 
 
 def sqlite_ffi() raises -> ref[MutUntrackedOrigin] Sqlite3FFI:
-    """The process-wide FFI table, borrowed.  Never destroy the referent."""
-    return _FFI.get_or_create_ptr()[]
+    """The process-wide FFI table, borrowed.  Never destroy the referent.
+
+    Raises:
+        Error: If libsqlite3 can't be loaded (see ``Sqlite3FFI.__init__``).
+    """
+    ref loaded = _FFI.get_or_create_ptr()[]
+    if not loaded.ffi:
+        raise Error(loaded.error)
+    return loaded.ffi.unsafe_value()
