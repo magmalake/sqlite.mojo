@@ -94,3 +94,11 @@ mojo-compiler = "==1.2.0"
 [environments]
 default = ["nightly"]
 stable = ["stable"]
+
+# customs (github.com/magmalake/customs) reads this table; pixi ignores it.
+[tool.customs.lints]
+# `test` runs four files with `mojo run`: the two test suites, and the
+# two crosscheck programs, which must stay separate programs because the
+# sqlite3 shell runs between them (tests/crosscheck.sh). One binary would
+# save one compile of two suites: a warning, not a failure.
+mojo-run-per-test = "warn"
