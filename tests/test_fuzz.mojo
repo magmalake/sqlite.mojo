@@ -26,7 +26,6 @@ Properties verified:
 """
 
 from std.memory import bitcast
-from std.testing import assert_equal, assert_true
 from sqlite.db import Database
 
 

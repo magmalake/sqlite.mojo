@@ -13,7 +13,7 @@ The application manages a simple contacts list: add contacts, update a phone
 number, soft-delete a contact, then print a filtered directory.
 """
 
-from sqlite.db import Database, Row, Transaction
+from sqlite.db import Database, Row
 
 
 # ---------------------------------------------------------------------------
