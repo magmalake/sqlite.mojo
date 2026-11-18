@@ -26,7 +26,7 @@ Demonstrates:
         raise e.copy()          # re-raise to caller
 """
 
-from sqlite import Database, Transaction
+from sqlite import Database
 
 
 # -------------------------------------------------------------------------

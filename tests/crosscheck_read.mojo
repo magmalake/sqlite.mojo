@@ -6,8 +6,8 @@ and asserts each column against the values the shell inserted -- REAL columns
 by exact equality, since the fixtures are exact binary fractions.
 """
 
-from std.testing import assert_equal, assert_true
-from sqlite.db import Database, Row
+from std.testing import assert_equal
+from sqlite.db import Database
 
 
 def main() raises:

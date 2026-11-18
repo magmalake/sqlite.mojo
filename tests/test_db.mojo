@@ -27,7 +27,7 @@ Coverage:
 """
 
 from std.testing import assert_equal, assert_true, assert_false
-from sqlite.db import Database, Row, Transaction
+from sqlite.db import Database
 
 
 def _count(mut db: Database, imm table: String) raises -> Int:
