@@ -4,7 +4,7 @@ All sqlite3 handles (``sqlite3*`` and ``sqlite3_stmt*``) are stored as
 ``Int`` (pointer address).  Input C strings are passed as ``Int`` via
 ``unsafe_ptr() → Int`` cast.  Output C-string return values are received
 as ``Pointer[UInt8, MutUntrackedOrigin]`` and immediately copied
-into owned ``String`` values via ``StringSlice``.
+into owned ``String`` values via ``StringSpan``.
 
 The library is loaded at runtime via ``OwnedDLHandle`` so Mojo's JIT
 never needs to resolve SQLite symbols at compile time, eliminating the
@@ -65,7 +65,7 @@ def _ptr_to_string(addr: Int) -> String:
     if addr == 0:
         return String("")
     var p = Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=addr)
-    return String(StringSlice(unsafe_from_utf8=CStringSpan(unsafe_from_ptr=p)))
+    return String(StringSpan(unsafe_from_utf8=CStringSpan(unsafe_from_ptr=p)))
 
 
 def _dl_sym[
