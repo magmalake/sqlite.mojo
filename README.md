@@ -179,8 +179,8 @@ and expensive enough to dominate everything around it.
   back one the shell wrote. Verified against CPython's `sqlite3` module too
   (libsqlite 3.50.4, a different build from the one the binding loads).
 
-Everything above runs on **both** Mojo 1.2.0 (stable) and the current nightly,
-on Linux and macOS.
+Everything above runs on Mojo 1.3.0.dev2026111805 (the nightly every magmalake
+tin is pinned to), on Linux and macOS.
 
 ## Examples
 
@@ -210,8 +210,6 @@ pixi run test-fuzz         # property tests, 13 500 trials
 pixi run test-crosscheck   # round-trip against the sqlite3 shell
 pixi run examples          # run all five examples
 pixi run format            # auto-format source
-
-pixi run -e stable test    # the same, on Mojo 1.2.0 instead of nightly
 ```
 
 ## License
