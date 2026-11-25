@@ -179,7 +179,7 @@ and expensive enough to dominate everything around it.
   back one the shell wrote. Verified against CPython's `sqlite3` module too
   (libsqlite 3.50.4, a different build from the one the binding loads).
 
-Everything above runs on Mojo 1.3.0.dev2026111805 (the nightly every magmalake
+Everything above runs on Mojo 1.3.0.dev2026112505 (the nightly every magmalake
 tin is pinned to), on Linux and macOS.
 
 ## Examples
