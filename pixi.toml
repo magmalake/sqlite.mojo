@@ -5,7 +5,7 @@ authors = [
 ]
 channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 name = "sqlite.mojo"
-version = "0.4.1"
+version = "0.4.2"
 description = "A Mojo binding to SQLite (libsqlite3) via FFI: connections, prepared statements, and RAII transactions."
 preview = ["pixi-build"]
 platforms = ["osx-arm64", "linux-64"]
@@ -19,7 +19,7 @@ sqlite = ">=3.45,<4"
 # Added by `pixi shelf add lint-mojo`: the linter comes from GitHub as a pixi
 # source dependency pinned at the revision mojoshelf published, and builds
 # the `mojolint` executable into every environment next to mojo-lsp-server.
-lint-mojo = { git = "https://github.com/magmalake/lint.mojo.git", rev = "076a7a349917151ff8016079a036654865b3ccc1" }
+lint-mojo = { git = "https://github.com/magmalake/lint.mojo.git", rev = "d52d43d575bb3d82e3cce43ce93bf4e4d6d89923" }
 # One toolchain: the tin, its tests and every consumer use the same Mojo
 # nightly. A precompiled Mojo package (.mojoc) loads only in the compiler
 # version that built it, so the pin is exact here and in [package] below, and
@@ -71,7 +71,7 @@ format-check = { cmd = "mojo format sqlite tests examples && git diff --exit-cod
 # import stays `from sqlite import …`.
 [package]
 name = "sqlite-mojo"
-version = "0.4.1"
+version = "0.4.2"
 
 [package.build]
 backend = { name = "pixi-build-mojo", version = "0.*" }
